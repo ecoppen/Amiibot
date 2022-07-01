@@ -1,6 +1,8 @@
 # Amiibot
 A python (3.9+) web scraper and stock notifier for Amiibo
 
+![amiibot](https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png)
+
 ## Getting started
 - Create a postgres database named `amiibot` or skip this step if using sqlite
 - Install git `apt-get install git` 
