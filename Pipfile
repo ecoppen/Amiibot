@@ -1,0 +1,23 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+psycopg2 = "*"
+pydantic = "*"
+sqlalchemy = "*"
+requests = "*"
+beautifulsoup4 = "*"
+
+[dev-packages]
+flake8 = "*"
+black = "*"
+pre-commit = "*"
+bandit = "*"
+isort = "*"
+mypy = "*"
+sqlalchemy = {extras = ["mypy"], version = "*"}
+
+[requires]
+python_version = "3.9"
