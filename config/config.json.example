@@ -1,0 +1,28 @@
+{
+  "database": {
+    "engine": "sqlite",
+    "username": "postgres",
+    "password": "",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "name": "amiibot"
+  },
+  "stockists": [
+    "nintendo.co.uk",
+    "shopto.net"
+  ],
+  "messengers": {
+    "messenger_1": {
+      "active": true,
+      "messenger_type": "discord",
+      "webhook_url": "https://discord.com/api/webhooks/"
+    },
+    "messenger_2": {
+      "active": false,
+      "messenger_type": "telegram",
+      "bot_token": "",
+      "chat_id": ""
+    }
+  },
+  "scrape_interval": 600
+}
