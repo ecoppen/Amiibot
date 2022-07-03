@@ -12,6 +12,11 @@ user_agents = UserAgent()
 user_agent_list = user_agents.get_user_agents()
 
 
+class BlankResponse:
+    def __init__(self):
+        self.content = ""
+
+
 def dispatch_request(http_method):
     session = requests.Session()
     session.headers.update(
@@ -26,6 +31,7 @@ def dispatch_request(http_method):
 
 
 def send_public_request(url, payload=None):
+    empty_response = BlankResponse()
     if payload is None:
         payload = {}
     query_string = urlencode(payload, True)
@@ -34,5 +40,16 @@ def send_public_request(url, payload=None):
 
     log.info(f"Requesting {url}")
 
-    response = dispatch_request("GET")(url=url)
+    try:
+        response = dispatch_request("GET")(url=url, timeout=10)
+    except requests.exceptions.Timeout:
+        log.info("Request timed out")
+        return empty_response
+    except requests.exceptions.TooManyRedirects:
+        log.warning("Too many redirects")
+        return empty_response
+    except requests.exceptions.RequestException as e:
+        log.warning(f"Request exception: {e}")
+        return empty_response
+
     return response
