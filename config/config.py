@@ -28,6 +28,7 @@ class Stockist(Enum):
     SHOPTO = "shopto.net"
     GAMEUK = "game.co.uk"
     NINTENDOUK = "nintendo.co.uk"
+    GAMESTOP = "gamestop.com"
 
 
 class Database(BaseModel, use_enum_values=True, extra=Extra.forbid):
