@@ -9,6 +9,8 @@ pydantic = "*"
 sqlalchemy = "*"
 requests = "*"
 beautifulsoup4 = "*"
+selenium = "*"
+chromedriver-autoinstaller = "*"
 
 [dev-packages]
 flake8 = "*"
