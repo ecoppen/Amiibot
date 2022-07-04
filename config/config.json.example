@@ -24,5 +24,6 @@
       "chat_id": ""
     }
   },
-  "scrape_interval": 600
+  "scrape_interval": 600,
+  "notify_first_run": false
 }
