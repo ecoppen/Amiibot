@@ -29,6 +29,9 @@ class Stockist(Enum):
     GAMEUK = "game.co.uk"
     NINTENDOUK = "nintendo.co.uk"
     GAMESTOP = "gamestop.com"
+    BESTBUY = "bestbuy.com"
+    BESTBUYCA = "bestbuy.ca"
+    PLAYASIA = "play-asia.com"
 
 
 class Database(BaseModel, use_enum_values=True, extra=Extra.forbid):
@@ -60,6 +63,7 @@ class Config(BaseModel, use_enum_values=True, extra=Extra.forbid):
         str, Annotated[Union[Discord, Telegram], Field(discriminator="messenger_type")]
     ]
     scrape_interval: int = 600
+    notify_first_run: bool = False
 
     @validator("scrape_interval")
     def interval_amount(cls, v):
