@@ -1,4 +1,5 @@
 import logging
+import time
 
 from messenger.discord import Discord
 from messenger.telegram import Telegram
@@ -35,3 +36,13 @@ class MessageManager:
     def check_for_one_messenger(self):
         if len(self.all_messengers) < 1:
             log.error("No messengers were set to true")
+
+    def send_message_to_all_messengers(self, message):
+        for messenger in self.all_messengers:
+            messenger.send_message(message=message)
+            time.sleep(0.5)
+
+    def send_embed_message_to_all_messengers(self, embed_data):
+        for messenger in self.all_messengers:
+            messenger.send_embed_message(embed_data=embed_data)
+            time.sleep(0.5)
