@@ -43,3 +43,6 @@ class Stockist:
         html = driver.page_source
         driver.quit()
         return html
+
+    def get_amiibo(self):
+        pass
