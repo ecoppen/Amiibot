@@ -32,6 +32,8 @@ class Stockist(Enum):
     BESTBUY = "bestbuy.com"
     BESTBUYCA = "bestbuy.ca"
     PLAYASIA = "play-asia.com"
+    MECCAJAPAN = "mecca-japan.com"
+    THESOURCE = "thesource.ca"
 
 
 class Database(BaseModel, use_enum_values=True, extra=Extra.forbid):
@@ -45,12 +47,14 @@ class Database(BaseModel, use_enum_values=True, extra=Extra.forbid):
 
 class Discord(BaseModel, use_enum_values=True, extra=Extra.forbid):
     active: bool = False
+    embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.DISCORD.value]  # type: ignore
     webhook_url: HttpUrl
 
 
 class Telegram(BaseModel, use_enum_values=True, extra=Extra.forbid):
     active: bool = False
+    embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.TELEGRAM.value]  # type: ignore
     bot_token: str
     chat_id: str
@@ -64,6 +68,8 @@ class Config(BaseModel, use_enum_values=True, extra=Extra.forbid):
     ]
     scrape_interval: int = 600
     notify_first_run: bool = False
+    heartbeat: bool = True
+    check_version: bool = True
 
     @validator("scrape_interval")
     def interval_amount(cls, v):

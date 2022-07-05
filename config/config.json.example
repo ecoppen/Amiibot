@@ -14,16 +14,20 @@
   "messengers": {
     "messenger_1": {
       "active": true,
+      "embedded_messages": true,
       "messenger_type": "discord",
       "webhook_url": "https://discord.com/api/webhooks/"
     },
     "messenger_2": {
       "active": false,
+      "embedded_messages": false,
       "messenger_type": "telegram",
       "bot_token": "",
       "chat_id": ""
     }
   },
   "scrape_interval": 600,
-  "notify_first_run": false
+  "notify_first_run": false,
+  "heartbeat": true,
+  "check_version": true
 }
