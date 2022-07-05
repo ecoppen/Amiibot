@@ -25,14 +25,14 @@ class MESSENGER(Enum):
 
 
 class Stockist(Enum):
-    SHOPTO = "shopto.net"
-    GAMEUK = "game.co.uk"
-    NINTENDOUK = "nintendo.co.uk"
-    GAMESTOP = "gamestop.com"
     BESTBUY = "bestbuy.com"
     BESTBUYCA = "bestbuy.ca"
-    PLAYASIA = "play-asia.com"
+    GAMESTOP = "gamestop.com"
+    GAMEUK = "game.co.uk"
     MECCAJAPAN = "mecca-japan.com"
+    NINTENDOUK = "nintendo.co.uk"
+    PLAYASIA = "play-asia.com"
+    SHOPTO = "shopto.net"
     THESOURCE = "thesource.ca"
 
 
@@ -74,7 +74,9 @@ class Config(BaseModel, use_enum_values=True, extra=Extra.forbid):
     @validator("scrape_interval")
     def interval_amount(cls, v):
         if v < 600:
-            raise ValueError("Scraping interval lower limit is 300 (10 mins)")
+            raise ValueError(
+                "Scraping interval lower limit is 600 seconds (10 minutes), play nice and don't get banned"
+            )
         return v
 
 
