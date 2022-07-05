@@ -1,13 +1,16 @@
-<p style="text-align: center;">
+<p align="center">
   <a href="https://ecoppen.github.io/amiibot/">
-    <img src="https://raw.githubusercontent.com/ecoppen/Amiibot/main/docs/amiibot.png" alt="Amiibot">
+    <img src="https://raw.githubusercontent.com/ecoppen/Amiibot/main/docs/amiibot.png" width="200"  alt="Amiibot">
   </a>
 </p>
 
-<h1 style="text-align: center;">
+<h1 align="center">
 Amiibot
 </h1>
-<p style="text-align: center;">
+
+<p align="center">
 A python (3.9+) web scraper and stock notifier for Amiibo
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+</p>
+<p align="center">
+<a href="https://github.com/psf/black"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-000000.svg"></a>
 </p>
