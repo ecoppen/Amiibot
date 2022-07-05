@@ -1,0 +1,27 @@
+site_name: Amiibot
+extra:
+  homepage: https://ecoppen.github.io/amiibot
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+repo_url: https://github.com/ecoppen/amiibot
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/git-alt
+  favicon: amiibot.png
+  features:
+    - navigation.tabs
+    - navigation.top
+    - toc.integrate
+  logo: amiibot.png
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
