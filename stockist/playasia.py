@@ -37,10 +37,31 @@ class PlayAsia(Stockist):
                 cards = soup.find_all("div", class_="p_prev")
 
             for card in cards:
-                name = card.find("span", class_="p_prev_n")
-                price = card.find("span", class_="price_val")
-                img = card.find("img", class_="p_prev_img")
-                url = card.find("a")
+                name = card.find_all(
+                    "span",
+                    attrs={"class": lambda e: e.startswith("p_prev_n") if e else False},
+                )
+                price = card.find_all(
+                    "span",
+                    attrs={
+                        "class": lambda e: e.startswith("price_val") if e else False
+                    },
+                )
+                img = card.find_all(
+                    "img",
+                    attrs={
+                        "class": lambda e: e.startswith("p_prev_img") if e else False
+                    },
+                )
+                url = card.find_all("a")
+
+                if name and price and img and url:
+                    name = name[0]
+                    price = price[0].find("div")
+                    img = img[0]
+                    url = url[0]
+                else:
+                    continue
 
                 found = {
                     "Colour": 0x00FF00,

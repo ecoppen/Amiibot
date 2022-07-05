@@ -35,11 +35,22 @@ class Game(Stockist):
             cards = soup.find_all("article", class_="product")
 
         for card in cards:
-            header = card.find("h2")
-            name = header.find("a")
-            price = card.find("span", class_="value")
-            img = card.find("img", class_="optimisedImg")
-            url = header.find("a")
+            name = card.find_all("a")
+            price = card.find_all(
+                "span", attrs={"class": lambda e: e.startswith("value") if e else False}
+            )
+            img = card.find_all(
+                "img",
+                attrs={"class": lambda e: e.startswith("optimisedImg") if e else False},
+            )
+
+            if name and price and img:
+                name = name[0]
+                price = price[0].find("div")
+                img = img[0]
+                url = name[0]
+            else:
+                continue
 
             found = {
                 "Colour": 0x00FF00,

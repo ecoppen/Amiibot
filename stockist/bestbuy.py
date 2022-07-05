@@ -32,13 +32,43 @@ class Bestbuy(Stockist):
             cards = soup.find_all("li", class_="sku-item")
 
         for card in cards:
-            header = card.find("h4", class_="sku-title")
-            name = header.find("a", class_="")
-            stock = card.find("button", class_="c-button")
-            price = card.find("div", class_="priceView-hero-price")
-            price = price.find("span")
-            img = card.find("img", class_="product-image")
-            url = header.find("a", class_="")
+            header = card.find_all(
+                "h4",
+                attrs={"class": lambda e: e.startswith("sku-title") if e else False},
+            )
+            if header:
+                name = header[0].find_all("a")
+            else:
+                continue
+
+            stock = card.find_all(
+                "button",
+                attrs={"class": lambda e: e.startswith("c-button") if e else False},
+            )
+
+            price = card.find_all(
+                "div",
+                attrs={
+                    "class": lambda e: e.startswith("priceView-hero-price")
+                    if e
+                    else False
+                },
+            )
+
+            img = card.find_all(
+                "img",
+                attrs={
+                    "class": lambda e: e.startswith("product-image") if e else False
+                },
+            )
+            if name and stock and price and img:
+                name = name[0]
+                stock = stock[0]
+                price = price[0].find("span")
+                img = img[0]
+                url = name[0]
+            else:
+                continue
 
             found = {
                 "Colour": 0x0000FF,

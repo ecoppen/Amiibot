@@ -44,11 +44,43 @@ class NintendoUK(Stockist):
                 cards = soup.find_all("div", class_="js-gtm-productImpression-item")
 
             for card in cards:
-                name = card.find("h2", class_="card__title")
-                stock = card.find("span", class_="btn__text")
-                price = card.find("data", class_="value")
-                img = card.find("img", class_="tile-image")
-                url = card.find("a", class_="card__link")
+                name = card.find_all(
+                    "h2",
+                    attrs={
+                        "class": lambda e: e.startswith("card__title") if e else False
+                    },
+                )
+                stock = card.find_all(
+                    "span",
+                    attrs={
+                        "class": lambda e: e.startswith("btn__text") if e else False
+                    },
+                )
+                price = card.find_all(
+                    "data",
+                    attrs={"class": lambda e: e.startswith("value") if e else False},
+                )
+                img = card.find_all(
+                    "img",
+                    attrs={
+                        "class": lambda e: e.startswith("tile-image") if e else False
+                    },
+                )
+                url = card.find_all(
+                    "a",
+                    attrs={
+                        "class": lambda e: e.startswith("card__link") if e else False
+                    },
+                )
+
+                if name and stock and price and img and url:
+                    name = name[0]
+                    stock = stock[0]
+                    price = price[0]
+                    img = img[0]
+                    url = url[0]
+                else:
+                    continue
 
                 found = {
                     "Colour": 0x0000FF,

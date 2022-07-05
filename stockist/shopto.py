@@ -31,12 +31,40 @@ class Shopto(Stockist):
             cards = soup.find_all("div", class_="itemlist2")
 
         for card in cards:
-            name = card.find("div", class_="itemlist__description")
-            stock = card.find("div", class_="inventory")
-            price = card.find("div", class_="cross_price")
-            img = card.find("div", class_="image")
-            img = img.find("img")
-            url = card.find("a", class_="itemlist__container")
+            name = card.find_all(
+                "div",
+                attrs={
+                    "class": lambda e: e.startswith("itemlist__description")
+                    if e
+                    else False
+                },
+            )
+            stock = card.find_all(
+                "div",
+                attrs={"class": lambda e: e.startswith("inventory") if e else False},
+            )
+            price = card.find_all(
+                "div",
+                attrs={"class": lambda e: e.startswith("cross_price") if e else False},
+            )
+            img = card.find_all("img")
+            url = card.find_all(
+                "a",
+                attrs={
+                    "class": lambda e: e.startswith("itemlist__container")
+                    if e
+                    else False
+                },
+            )
+
+            if name and stock and price and img and url:
+                name = name[0]
+                stock = stock[0]
+                price = price[0]
+                img = img[0]
+                url = url[0]
+            else:
+                continue
 
             found = {
                 "Colour": 0x0000FF,
