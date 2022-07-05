@@ -20,6 +20,7 @@ bandit = "*"
 isort = "*"
 mypy = "*"
 sqlalchemy = {extras = ["mypy"], version = "*"}
+mkdocs-material = "*"
 
 [requires]
 python_version = "3.9"
