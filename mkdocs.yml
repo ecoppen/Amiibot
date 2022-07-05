@@ -1,11 +1,11 @@
 site_name: Amiibot
 extra:
-  homepage: https://ecoppen.github.io/amiibot
+  homepage: https://ecoppen.github.io/Amiibot
 markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
-repo_url: https://github.com/ecoppen/amiibot
+repo_url: https://github.com/ecoppen/Amiibot
 theme:
   name: material
   icon:
