@@ -8,8 +8,8 @@ log = logging.getLogger(__name__)
 
 
 class Telegram(Messenger):
-    def __init__(self, name, bot_token, chat_id):
-        super().__init__(name)
+    def __init__(self, name, stockists, bot_token, chat_id):
+        super().__init__(name=name, stockists=stockists)
         self.bot_token = bot_token
         self.chat_id = chat_id
 

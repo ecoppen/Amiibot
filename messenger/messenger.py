@@ -4,8 +4,9 @@ log = logging.getLogger(__name__)
 
 
 class Messenger:
-    def __init__(self, name):
+    def __init__(self, name, stockists):
         self.name = name
+        self.stockists = stockists
 
     messenger = None
 

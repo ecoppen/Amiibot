@@ -17,6 +17,7 @@ class MessageManager:
                 if messenger_object.messenger_type == "discord":
                     discord = Discord(
                         name=messenger_config,
+                        stockists=messenger_object.stockists,
                         webhook_url=messenger_object.webhook_url,
                     )
                     self.all_messengers.append(discord)
@@ -26,6 +27,7 @@ class MessageManager:
                     self.all_messengers.append(
                         Telegram(
                             name=messenger_config,
+                            stockists=messenger_object.stockists,
                             bot_token=messenger_object.bot_token,
                             chat_id=messenger_object.chat_id,
                         )

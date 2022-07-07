@@ -9,8 +9,8 @@ log = logging.getLogger(__name__)
 
 
 class Discord(Messenger):
-    def __init__(self, name, webhook_url):
-        super().__init__(name)
+    def __init__(self, name, stockists, webhook_url):
+        super().__init__(name=name, stockists=stockists)
         self.webhook_url = webhook_url
 
     messenger = "discord"
