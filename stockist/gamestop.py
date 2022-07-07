@@ -9,8 +9,8 @@ log = logging.getLogger(__name__)
 
 
 class Gamestop(Stockist):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, messengers):
+        super().__init__(messengers=messengers)
 
         self.params = {"prefn1": "buryMaster", "prefv1": "In Stock"}
 
