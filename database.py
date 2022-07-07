@@ -33,11 +33,43 @@ class Database:
 
             id = db.Column(db.Integer, primary_key=True)
             stockist = db.Column(db.String)
+            name = db.Column(db.String)
             price = db.Column(db.String)
             stock = db.Column(db.String)
+            hyperlink = db.Column(db.String)
+            image = db.Column(db.String)
+            timestamp = db.Column(
+                db.DateTime, default=datetime.now, onupdate=datetime.now
+            )
+
+        class LastScraped(self.Base):  # type: ignore
+            __tablename__ = "last_scraped"
+
+            stockist = db.Column(db.String, primary_key=True)
             timestamp = db.Column(
                 db.DateTime, default=datetime.now, onupdate=datetime.now
             )
 
         self.Base.metadata.create_all(self.engine)  # type: ignore
-        log.info("amiibo_stock table loaded")
+        log.info("database tables loaded")
+
+    def get_table_object(self, table_name: str):
+        self.Base.metadata.reflect(self.engine)  # type: ignore
+        return self.Base.metadata.tables.get(table_name)  # type: ignore
+
+    def get_last_github_check(self):
+        table_object = self.get_table_object(table_name="last_scraped")
+        return self.session.query(table_object).filter_by(stockist="github.com").first()
+
+    def get_days_since_last_github_check(self):
+        return abs(self.get_last_github_check()[1] - datetime.now()).days
+
+    def update_or_insert_last_scraped(self, stockist):
+        table_object = self.get_table_object(table_name="last_scraped")
+        check = self.session.query(table_object).filter_by(stockist=stockist).first()
+        if check is None:
+            self.engine.execute(table_object.insert().values(stockist=stockist))
+        else:
+            self.session.query(table_object).filter_by(stockist=stockist).update(
+                {"timestamp": datetime.now}
+            )
