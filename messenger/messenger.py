@@ -4,9 +4,10 @@ log = logging.getLogger(__name__)
 
 
 class Messenger:
-    def __init__(self, name, stockists):
+    def __init__(self, name, stockists, active):
         self.name = name
         self.stockists = stockists
+        self.active = active
 
     messenger = None
 
