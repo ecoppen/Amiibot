@@ -6,28 +6,32 @@
     "host": "127.0.0.1",
     "port": 5432,
     "name": "amiibot"
-  },
-  "stockists": [
-    "nintendo.co.uk",
-    "shopto.net"
-  ],
+  }
   "messengers": {
     "messenger_1": {
       "active": true,
       "embedded_messages": true,
       "messenger_type": "discord",
-      "webhook_url": "https://discord.com/api/webhooks/"
+      "webhook_url": "https://discord.com/api/webhooks/",
+      "stockists": [
+        "nintendo.co.uk",
+        "shopto.net"
+      ]
     },
     "messenger_2": {
       "active": false,
       "embedded_messages": false,
       "messenger_type": "telegram",
       "bot_token": "",
-      "chat_id": ""
+      "chat_id": "",
+      "stockists": [
+        "nintendo.co.uk",
+        "shopto.net"
+      ]
     }
   },
   "scrape_interval": 600,
   "notify_first_run": false,
   "heartbeat": true,
-  "check_version": true
+  "check_version_daily": true
 }

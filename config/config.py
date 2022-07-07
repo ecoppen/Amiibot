@@ -50,6 +50,7 @@ class Discord(BaseModel, use_enum_values=True, extra=Extra.forbid):
     embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.DISCORD.value]  # type: ignore
     webhook_url: HttpUrl
+    stockists: list[Stockist]
 
 
 class Telegram(BaseModel, use_enum_values=True, extra=Extra.forbid):
@@ -58,18 +59,18 @@ class Telegram(BaseModel, use_enum_values=True, extra=Extra.forbid):
     messenger_type: Literal[MESSENGER.TELEGRAM.value]  # type: ignore
     bot_token: str
     chat_id: str
+    stockists: list[Stockist]
 
 
 class Config(BaseModel, use_enum_values=True, extra=Extra.forbid):
     database: Database
-    stockists: list[Stockist]
     messengers: dict[
         str, Annotated[Union[Discord, Telegram], Field(discriminator="messenger_type")]
     ]
     scrape_interval: int = 600
     notify_first_run: bool = False
     heartbeat: bool = True
-    check_version: bool = True
+    check_version_daily: bool = True
 
     @validator("scrape_interval")
     def interval_amount(cls, v):
