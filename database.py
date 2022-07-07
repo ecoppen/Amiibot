@@ -71,5 +71,7 @@ class Database:
             self.engine.execute(table_object.insert().values(stockist=stockist))
         else:
             self.session.query(table_object).filter_by(stockist=stockist).update(
-                {"timestamp": datetime.now}
+                {"timestamp": datetime.now()}
             )
+            self.session.commit()
+            self.session.flush()
