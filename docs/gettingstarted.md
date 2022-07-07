@@ -3,17 +3,32 @@
 Amiibot is a web scraper and stock notifier for Amiibo. You can select a range of different websites to track and 
 when a stock update occurs (`In stock`, `Out of stock`, `Price change`) you will notified via your selected medium.
 
-## Server acquisition
+## Requirements
+### Hardware requirements
+To run this bot it is recommended that you run a linux cloud instance however it will run perfectly fine on a Raspberry Pi. 
 
-!!! info "Why do I need a server?"
+!!! info "Do I need a server?"
 
     An external server setup is recommended over one in your home because of speed, reliability and location. 
     You are welcome to skip this section if you are confident that your device will be on 24/7, 
     maintain a stable internet connection and have no issue with accessing IP or geographically blocked websites.
 
+### Software requirements
+- git
+- Python 3.9
+- pip (pip3)
+- pipenv
+
+Optional:
+- PostgreSQL
+
 ## Installation
-- Create a postgres database named `amiibot` or skip this step if using sqlite
-- Install git `apt-get install git` 
+### Debian / Ubuntu
+
+- Make sure your repositories are up-to-date `sudo apt-get update`
+- Upgrade any installed packages that are out of date `sudo apt-get upgrade`
+- Install pip and git `sudo apt install -y python3-pip git`
+- Create a PostgreSQL database named `amiibot` or skip this step if using sqlite
 - Clone the repo `git clone https://github.com/ecoppen/Amiibot.git`
 - Navigate to the repo root `cd Amiibot`
 - Navigate to the config folder `cd config`
