@@ -1,6 +1,7 @@
 import logging
 import time
 from enum import Enum
+from typing import Any
 
 import chromedriver_autoinstaller
 from selenium import webdriver
@@ -17,8 +18,9 @@ class Stock(Enum):
 
 
 class Stockist:
-    def __init__(self):
-        self.params = {}
+    def __init__(self, messengers) -> None:
+        self.params: dict[str, Any] = {}
+        self.messengers = messengers
 
     base_url = None
     name = None
