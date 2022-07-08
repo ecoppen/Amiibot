@@ -14,12 +14,14 @@ To run this bot it is recommended that you run a linux cloud instance however it
     maintain a stable internet connection and have no issue with accessing IP or geographically blocked websites.
 
 ### Software requirements
+
 - git
 - Python 3.9
 - pip (pip3)
 - pipenv
 
 Optional:
+
 - PostgreSQL
 
 ## Installation
