@@ -8,6 +8,7 @@ markdown_extensions:
 repo_url: https://github.com/ecoppen/Amiibot
 theme:
   name: material
+  custom_dir: docs/material
   icon:
     repo: fontawesome/brands/git-alt
   favicon: amiibot.png
