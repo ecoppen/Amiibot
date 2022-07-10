@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
@@ -15,7 +16,19 @@ log = logging.getLogger(__name__)
 
 class StockistManager:
     def __init__(self, messengers) -> None:
-        self.all_stockists = []
+        self.all_stockists: list[
+            Union[
+                Bestbuy,
+                BestbuyCA,
+                Game,
+                Gamestop,
+                MecchaJapan,
+                NintendoUK,
+                PlayAsia,
+                Shopto,
+                TheSource,
+            ]
+        ] = []
         self.messengers = messengers
         self.relationships: dict[str, list[str]] = {}
 

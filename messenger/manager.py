@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Union
 
 from messenger.discord import Discord
 from messenger.telegram import Telegram
@@ -9,7 +10,7 @@ log = logging.getLogger(__name__)
 
 class MessageManager:
     def __init__(self, config) -> None:
-        self.all_messengers = []
+        self.all_messengers: list[Union[Discord, Telegram]] = []
         self.messenger_names: list[str] = []
 
         for messenger_config in config:

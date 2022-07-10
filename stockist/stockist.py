@@ -1,7 +1,7 @@
 import logging
 import time
 from enum import Enum
-from typing import Any
+from typing import Any, Union
 
 import chromedriver_autoinstaller
 from selenium import webdriver
@@ -22,8 +22,8 @@ class Stockist:
         self.params: dict[str, Any] = {}
         self.messengers = messengers
 
-    base_url = None
-    name = None
+    base_url: Union[str, None] = None
+    name: Union[str, None] = None
 
     def scrape(self, url, payload):
         return send_public_request(url=url, payload=payload)

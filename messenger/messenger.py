@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 
 import requests  # type: ignore
 
@@ -17,7 +18,7 @@ class Messenger:
         self.active = active
         self.empty_response = BlankResponse()
 
-    messenger = None
+    messenger: Union[str, None] = None
 
     def send_post(self, url, json=None, timeout=5):
         try:
