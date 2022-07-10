@@ -1,8 +1,6 @@
 import logging
 from datetime import datetime
 
-import requests  # type: ignore
-
 from messenger.messenger import Messenger
 
 log = logging.getLogger(__name__)
@@ -21,15 +19,14 @@ class Discord(Messenger):
 
     def send_message(self, message):
         if self.active:
-            log.info(f"Sending discord message  {self.name}to: {message}")
+            log.info(f"Sending discord message via {self.name}: {message}")
             self.data["content"] = message
-            response = requests.post(self.webhook_url, json=self.data)
-            return response
+            return self.send_post(url=self.webhook_url, json=self.data)
         log.info(f"{self.name} (discord messenger) is inactive")
 
     def send_embed_message(self, embed_data):
         if self.active:
-            log.info(f"Sending embedded discord message to {self.name}: {embed_data}")
+            log.info(f"Sending embedded discord message via {self.name}: {embed_data}")
 
             options, payload = self.format_embed_data(embed_data)
 
@@ -52,9 +49,8 @@ class Discord(Messenger):
                 "text": f"Amiibot - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 "icon_url": "https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png",
             }
-            response = requests.post(self.webhook_url, json=self.data)
 
-            return response
+            return self.send_post(url=self.webhook_url, json=self.data)
 
         log.info(f"{self.name} (discord messenger) is inactive")
 
