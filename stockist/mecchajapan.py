@@ -80,5 +80,5 @@ class MecchaJapan(Stockist):
                 }
 
                 all_found.append(found)
-                break
+
         return all_found
