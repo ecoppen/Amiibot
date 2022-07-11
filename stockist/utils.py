@@ -20,7 +20,10 @@ class BlankResponse:
 def dispatch_request(http_method):
     session = requests.Session()
     session.headers.update(
-        {"Content-Type": "charset=utf-8", "User-Agent": secrets.choice(user_agent_list)}
+        {
+            "Content-Type": "charset=utf-8",
+            "User-Agent": str(secrets.choice(user_agent_list)),
+        }
     )
     return {
         "GET": session.get,
