@@ -5,6 +5,7 @@ from typing import Any, Union
 
 import chromedriver_autoinstaller
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 
 from stockist.utils import send_public_request
@@ -38,9 +39,12 @@ class Stockist:
         options.add_experimental_option("excludeSwitches", ["enable-logging"])
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument("--disable-blink-features=AutomationControlled")
-
-        driver = webdriver.Chrome(options=options)
-        driver.get(url)
+        try:
+            driver = webdriver.Chrome(options=options)
+            driver.get(url)
+        except WebDriverException as e:
+            log.error(f"Selenium exception: {e.msg}")
+            return ""
         time.sleep(5)
         html = driver.page_source
         driver.quit()
