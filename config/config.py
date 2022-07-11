@@ -27,6 +27,7 @@ class MESSENGER(Enum):
 class Stockist(Enum):
     BESTBUY = "bestbuy.com"
     BESTBUYCA = "bestbuy.ca"
+    CEXUK = "uk.webuy.com"
     GAMESTOP = "gamestop.com"
     GAMEUK = "game.co.uk"
     MECCAJAPAN = "mecca-japan.com"

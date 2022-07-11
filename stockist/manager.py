@@ -3,6 +3,7 @@ from typing import Union
 
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
+from stockist.cexuk import CexUK
 from stockist.game import Game
 from stockist.gamestop import Gamestop
 from stockist.mecchajapan import MecchaJapan
@@ -20,6 +21,7 @@ class StockistManager:
             Union[
                 Bestbuy,
                 BestbuyCA,
+                CexUK,
                 Game,
                 Gamestop,
                 MecchaJapan,
@@ -76,6 +78,10 @@ class StockistManager:
             elif stockist == "thesource.ca":
                 thesource = TheSource(messengers=messengers)
                 self.all_stockists.append(thesource)
+                log.info(f"Now tracking {stockist}")
+            elif stockist == "uk.webuy.com":
+                cexuk = CexUK(messengers=messengers)
+                self.all_stockists.append(cexuk)
                 log.info(f"Now tracking {stockist}")
 
         stockist_check = self.check_for_one_stockist()

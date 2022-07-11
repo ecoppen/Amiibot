@@ -93,3 +93,4 @@ Currently supported websites for scraping are:
 - play-asia.com
 - shopto.net
 - thesource.ca
+- uk.webuy.com
