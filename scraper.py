@@ -70,3 +70,26 @@ class Scraper:
             and self.database.get_days_since_last_github_check() > 0
         ):
             self.compare_current_to_latest()
+
+        for stockist in self.stockists.all_stockists:
+            log.info(f"Scraping {stockist.name}")
+            scraped = stockist.get_amiibo()
+            log.info(f"Scraped {len(scraped)} items")
+            if len(scraped) > 0:
+                to_notify = self.database.check_then_add_or_update_amiibo(scraped)
+
+                if len(to_notify) == 0:
+                    continue
+
+                if (
+                    self.database.check_first_run() is None
+                    and not self.notify_first_run
+                ):
+                    continue
+
+                for each in self.messengers.all_messengers:
+                    if each.name in stockist.messengers:
+                        for item in to_notify:
+                            each.send_embed_message(item)
+            else:
+                log.info(f"{stockist.name} has no amiibo ;(")
