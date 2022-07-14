@@ -32,12 +32,13 @@ class Database:
             __tablename__ = "amiibo_stock"
 
             id = db.Column(db.Integer, primary_key=True)
-            stockist = db.Column(db.String)
-            name = db.Column(db.String)
-            price = db.Column(db.String)
-            stock = db.Column(db.String)
-            hyperlink = db.Column(db.String)
-            image = db.Column(db.String)
+            Website = db.Column(db.String)
+            Title = db.Column(db.String)
+            Price = db.Column(db.String)
+            Stock = db.Column(db.String)
+            Colour = db.Column(db.String)
+            URL = db.Column(db.String)
+            Image = db.Column(db.String)
             timestamp = db.Column(
                 db.DateTime, default=datetime.now, onupdate=datetime.now
             )
@@ -62,6 +63,8 @@ class Database:
         return self.session.query(table_object).filter_by(stockist="github.com").first()
 
     def get_days_since_last_github_check(self):
+        if self.get_last_github_check() is None:
+            return 1
         return abs(self.get_last_github_check()[1] - datetime.now()).days
 
     def update_or_insert_last_scraped(self, stockist):
@@ -75,3 +78,18 @@ class Database:
             )
             self.session.commit()
             self.session.flush()
+
+    def check_first_run(self):
+        table_object = self.get_table_object(table_name="amiibo_stock")
+        return self.session.query(table_object).first()
+
+    def check_then_add_or_update_amiibo(self, data):
+        # output = []
+        table_object = self.get_table_object(table_name="amiibo_stock")
+        check = (
+            self.session.query(table_object).filter_by(Website=data[0]["Website"]).all()
+        )
+        if len(check) == 0:
+            for datum in data:
+                self.engine.execute(table_object.insert().values(datum))
+            return data
