@@ -14,8 +14,10 @@ log = logging.getLogger(__name__)
 
 
 class Stock(Enum):
+    DELISTED = "Delisted"
     IN_STOCK = "In stock"
     OUT_OF_STOCK = "Out of Stock"
+    PRICE_CHANGE = "Price change"
 
 
 class Stockist:
