@@ -74,17 +74,18 @@ class Scraper:
         for stockist in self.stockists.all_stockists:
             log.info(f"Scraping {stockist.name}")
             scraped = stockist.get_amiibo()
+            self.database.update_or_insert_last_scraped(stockist=stockist.name)
+
             log.info(f"Scraped {len(scraped)} items")
             if len(scraped) > 0:
                 to_notify = self.database.check_then_add_or_update_amiibo(scraped)
-
                 if len(to_notify) == 0:
                     continue
 
-                if (
-                    self.database.check_first_run() is None
-                    and not self.notify_first_run
-                ):
+                if not self.notify_first_run:
+                    log.info(
+                        "Skipping notifications for the first complete scrape cycle"
+                    )
                     continue
 
                 for each in self.messengers.all_messengers:
@@ -93,3 +94,6 @@ class Scraper:
                             each.send_embed_message(item)
             else:
                 log.info(f"{stockist.name} has no amiibo ;(")
+
+        if not self.notify_first_run:
+            self.notify_first_run = True
