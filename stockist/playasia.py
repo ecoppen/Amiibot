@@ -57,7 +57,7 @@ class PlayAsia(Stockist):
 
                 if name and price and img and url:
                     name = name[0]
-                    price = price[0].find("div")
+                    price = price[0]
                     img = img[0]
                     url = url[0]
                 else:

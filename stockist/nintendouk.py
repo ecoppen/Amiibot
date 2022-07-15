@@ -86,7 +86,7 @@ class NintendoUK(Stockist):
                     "Colour": 0x0000FF,
                     "Title": name.text.strip(),
                     "Image": img["src"].strip(),
-                    "URL": f"https://store.nintendo.co.uk/en_gb/{url['href'].strip()}",
+                    "URL": f"https://store.nintendo.co.uk/en_gb{url['href'].strip()}",
                     "Price": price.text.strip(),
                     "Stock": "",
                     "Website": self.name,
@@ -98,6 +98,8 @@ class NintendoUK(Stockist):
                 else:
                     found["Colour"] = 0xFF0000
                     found["Stock"] = Stock.OUT_OF_STOCK.value
-                all_found.append(found)
+
+                if found not in all_found:
+                    all_found.append(found)
 
         return all_found

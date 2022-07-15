@@ -43,12 +43,11 @@ class Game(Stockist):
                 "img",
                 attrs={"class": lambda e: e.startswith("optimisedImg") if e else False},
             )
-
             if name and price and img:
-                name = name[0]
-                price = price[0].find("div")
+                name = name[1]
+                price = price[0]
                 img = img[0]
-                url = name[0]
+                url = name
             else:
                 continue
 
