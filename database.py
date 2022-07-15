@@ -103,6 +103,7 @@ class Database:
             matched = False
             for datum in data:
                 if datum["URL"] == item.URL:
+                    matched = True
                     if datum["Price"] != item.Price:
                         datum["Stock"] = Stock.PRICE_CHANGE.value
                         datum["Colour"] = 0x0000FF
