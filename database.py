@@ -6,6 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 from config.config import Database as Database_
+from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
 
@@ -84,12 +85,68 @@ class Database:
         return self.session.query(table_object).first()
 
     def check_then_add_or_update_amiibo(self, data):
-        # output = []
+        statistics = {"New": 0, "Updated": 0, "Deleted": 0}
+        output = []
         table_object = self.get_table_object(table_name="amiibo_stock")
         check = (
             self.session.query(table_object).filter_by(Website=data[0]["Website"]).all()
         )
         if len(check) == 0:
             for datum in data:
+                log.info(f"Adding {datum['Title']}")
+                statistics["New"] += 1
                 self.engine.execute(table_object.insert().values(datum))
+            log.info(f"New items saved: {statistics['New']}")
             return data
+
+        for item in check:
+            matched = False
+            for datum in data:
+                if datum["URL"] == item.URL:
+                    if datum["Price"] != item.Price:
+                        datum["Stock"] = Stock.PRICE_CHANGE.value
+                        datum["Colour"] = 0x0000FF
+                        log.info(
+                            f"Price changed for {item.Title} from {item.Price} to {datum['Price']}"
+                        )
+                        statistics["Updated"] += 1
+                        self.session.query(table_object).filter_by(URL=item.URL).update(
+                            {"Price": datum["Price"]}
+                        )
+                        self.session.commit()
+                        self.session.flush()
+
+                        output.append(datum)
+                    break
+            if not matched:
+                builder = {
+                    "Colour": 0xFF0000,
+                    "Title": item.Title,
+                    "Image": item.Image,
+                    "URL": item.URL,
+                    "Price": item.Price,
+                    "Stock": Stock.DELISTED.value,
+                    "Website": item.Website,
+                }
+                output.append(builder)
+                log.info(f"{item.Title} is no longer listed")
+                statistics["Deleted"] += 1
+                self.session.query(table_object).filter_by(id=item.id).delete()
+                self.session.commit()
+                self.session.flush()
+
+        for datum in data:
+            matched = False
+            for item in check:
+                if datum["URL"] == item.URL:
+                    matched = True
+            if not matched:
+                output.append(datum)
+                log.info(f"Adding {datum['Title']}")
+                statistics["New"] += 1
+                self.engine.execute(table_object.insert().values(datum))
+
+        log.info(
+            f"Added: {statistics['New']}, Updated: {statistics['Updated']}, Deleted: {statistics['Deleted']}"
+        )
+        return output
