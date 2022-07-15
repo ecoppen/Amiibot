@@ -69,8 +69,8 @@ class Shopto(Stockist):
             found = {
                 "Colour": 0x0000FF,
                 "Title": name.text.strip(),
-                "Image": f"https://www.shopto.net/{img['src'].strip()}",
-                "URL": f"https://www.shopto.net/{url['href'].strip()}",
+                "Image": f"https://www.shopto.net{img['src'].strip()}",
+                "URL": f"https://www.shopto.net{url['href'].strip()}",
                 "Price": price.text.strip(),
                 "Stock": "",
                 "Website": self.name,
