@@ -75,7 +75,6 @@ class Scraper:
             log.info(f"Scraping {stockist.name}")
             scraped = stockist.get_amiibo()
             self.database.update_or_insert_last_scraped(stockist=stockist.name)
-
             log.info(f"Scraped {len(scraped)} items")
             if len(scraped) > 0:
                 to_notify = self.database.check_then_add_or_update_amiibo(scraped)
