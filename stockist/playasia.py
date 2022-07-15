@@ -67,12 +67,13 @@ class PlayAsia(Stockist):
                     "Colour": 0x00FF00,
                     "Title": name.text.strip(),
                     "Image": f"https:{img['src'].strip()}",
-                    "URL": f"https://www.play-asia.com/{url['href'].strip()}",
+                    "URL": f"https://www.play-asia.com{url['href'].strip()}",
                     "Price": price.text.strip(),
                     "Stock": Stock.IN_STOCK.value,
                     "Website": self.name,
                 }
 
-                all_found.append(found)
+                if found not in all_found:
+                    all_found.append(found)
 
         return all_found
