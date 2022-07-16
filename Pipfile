@@ -4,13 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-psycopg2 = "*"
 pydantic = "*"
 sqlalchemy = "*"
 requests = "*"
 beautifulsoup4 = "*"
 selenium = "*"
 chromedriver-autoinstaller = "*"
+psycopg2-binary = "*"
 
 [dev-packages]
 flake8 = "*"
