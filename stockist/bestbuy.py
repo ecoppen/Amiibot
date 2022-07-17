@@ -62,11 +62,11 @@ class Bestbuy(Stockist):
                 },
             )
             if name and stock and price and img:
-                name = name[0]
+                name = name
                 stock = stock[0]
                 price = price[0].find("span")
                 img = img[0]
-                url = name[0]
+                url = name
             else:
                 continue
 
