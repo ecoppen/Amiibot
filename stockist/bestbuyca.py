@@ -1,3 +1,4 @@
+import json
 import logging
 
 import requests  # type: ignore
@@ -12,65 +13,35 @@ class BestbuyCA(Stockist):
     def __init__(self, messengers):
         super().__init__(messengers=messengers)
 
-        self.params = None
+        self.params = {"categoryid": 306351, "page": 1, "pageSize": 100}
 
-    base_url = "https://www.bestbuy.ca/en-ca/category/nintendo-amiibo/306351"
+    base_url = "https://www.bestbuy.ca/api/v2/json/search"
     name = "Bestbuy CA"
 
     def get_amiibo(self):
         all_found = []
 
-        response = self.scrape_with_selenium(url=self.base_url, payload=self.params)
-        soup = BeautifulSoup(response, "html.parser")
-        cards = soup.find_all("div", class_="x-productListItem")
+        response = self.scrape(url=self.base_url, payload=self.params)
 
-        for card in cards:
-            name = card.find_all(
-                "div",
-                attrs={
-                    "class": lambda e: e.startswith("productItemName") if e else False
-                },
-            )
-            stock = card.find_all(
-                "span",
-                attrs={"class": lambda e: e.startswith("container_") if e else False},
-            )
-            price = card.find_all(
-                "div", attrs={"class": lambda e: e.startswith("price_") if e else False}
-            )
-            img = card.find_all(
-                "img",
-                attrs={
-                    "class": lambda e: e.startswith("productItemImage") if e else False
-                },
-            )
-            url = card.find_all(
-                "a", attrs={"class": lambda e: e.startswith("link_") if e else False}
-            )
-            if name and stock and price and img and url:
-                name = name[0]
-                stock = stock[0]
-                price = price[0].find("div")
-                img = img[0]
-                url = url[0]
-            else:
-                continue
-            found = {
-                "Colour": 0x0000FF,
-                "Title": name.text.strip(),
-                "Image": img["src"].strip(),
-                "URL": f"https://www.bestbuy.ca/{url['href'].strip()}",
-                "Price": price.text.strip(),
-                "Stock": "",
-                "Website": self.name,
-            }
+        try:
+            cards = json.loads(response.content.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            log.error(f"Invalid JSON: {exc.msg}, line {exc.lineno}, column {exc.colno}")
+            return all_found
 
-            if stock.text.strip() == "Available to ship":
-                found["Colour"] = 0x00FF00
-                found["Stock"] = Stock.IN_STOCK.value
-            else:
-                found["Colour"] = 0xFF0000
-                found["Stock"] = Stock.OUT_OF_STOCK.value
-            all_found.append(found)
+        if "products" in cards:
+            for card in cards["products"]:
+
+                found = {
+                    "Colour": 0x00FF00,
+                    "Title": card["name"].strip(),
+                    "Image": card["thumbnailImage"].strip(),
+                    "URL": f"https://www.bestbuy.ca{card['productUrl'].strip()}",
+                    "Price": card["salePrice"],
+                    "Stock": Stock.IN_STOCK.value,
+                    "Website": self.name,
+                }
+
+                all_found.append(found)
 
         return all_found
