@@ -1,4 +1,5 @@
 import logging
+import secrets
 import time
 from enum import Enum
 from typing import Any, Union
@@ -8,9 +9,13 @@ from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 
+from stockist.useragents import UserAgent
 from stockist.utils import send_public_request
 
 log = logging.getLogger(__name__)
+
+user_agents = UserAgent()
+user_agent_list = user_agents.get_user_agents()
 
 
 class Stock(Enum):
@@ -42,6 +47,7 @@ class Stockist:
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--no-sandbox")
+        options.add_argument(f"user-agent={secrets.choice(user_agent_list)}")
         try:
             driver = webdriver.Chrome(options=options)
             driver.get(url)
