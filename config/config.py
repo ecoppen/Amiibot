@@ -30,7 +30,7 @@ class Stockist(Enum):
     CEXUK = "uk.webuy.com"
     GAMESTOP = "gamestop.com"
     GAMEUK = "game.co.uk"
-    MECCAJAPAN = "mecca-japan.com"
+    MECCHAJAPAN = "meccha-japan.com"
     NINTENDOUK = "nintendo.co.uk"
     PLAYASIA = "play-asia.com"
     SHOPTO = "shopto.net"
