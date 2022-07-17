@@ -41,6 +41,7 @@ class Stockist:
         options.add_experimental_option("excludeSwitches", ["enable-logging"])
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--no-sandbox")
         try:
             driver = webdriver.Chrome(options=options)
             driver.get(url)
