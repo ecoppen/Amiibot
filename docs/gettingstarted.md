@@ -44,6 +44,7 @@ Optional:
 - Install pipenv `pip install pipenv`
 - Install required packages `pipenv install`
 - Activate the environment `pipenv shell`
+- Start the bot `python amiibot.py`
 
 ### Developers
 - Install developer requirements from pipenv `pipenv install --dev`
@@ -89,7 +90,7 @@ Currently supported websites for scraping are:
 - bestbuy.ca
 - gamestop.com
 - game.co.uk
-- mecca-japan.com
+- meccha-japan.com
 - nintendo.co.uk
 - play-asia.com
 - shopto.net
