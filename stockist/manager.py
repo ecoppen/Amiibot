@@ -59,9 +59,9 @@ class StockistManager:
                 game = Game(messengers=messengers)
                 self.all_stockists.append(game)
                 log.info(f"Now tracking {stockist}")
-            elif stockist == "mecca-japan.com":
-                meccajapan = MecchaJapan(messengers=messengers)
-                self.all_stockists.append(meccajapan)
+            elif stockist == "meccha-japan.com":
+                mecchajapan = MecchaJapan(messengers=messengers)
+                self.all_stockists.append(mecchajapan)
                 log.info(f"Now tracking {stockist}")
             elif stockist == "nintendo.co.uk":
                 nintendouk = NintendoUK(messengers=messengers)
