@@ -243,7 +243,7 @@
         "sha256:6f82bd3de45da303cf1f771ecafa1633750a358436a8bb60e06a1ceb745d2672",
         "sha256:c4ab89a56575d6d38a05aa16daeaa333109c1f96167aba8901ab18b6b5e0f7f5"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==1.2.0"
     },
     "psycopg2-binary": {
@@ -456,7 +456,7 @@
         "sha256:4dc0bf9d5cc78767fc4516325b6d80cc0968705a31d0eec2ecd7cdda466265b0",
         "sha256:523f39b7b69eef73501cebfe1aafd400a9aad5b03543a0eded52952488ff1c13"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==0.21.0"
     },
     "trio-websocket": {
@@ -472,7 +472,7 @@
         "sha256:25642c956049920a5aa49edcdd6ab1e06d7e5d467fc00e0506c44ac86fbfca02",
         "sha256:e6d2677a32f47fc7eb2795db1dd15c1f34eff616bcaf2cfb5e997f854fa1c4a6"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==4.3.0"
     },
     "urllib3": {
@@ -492,7 +492,7 @@
         "sha256:2218cb57952d90b9fca325c0dcfb08c3bda93e8fd8070b0a17f048e2e47a521b",
         "sha256:a2e56bfd5c7cd83c1369d83b5feccd6d37798b74872866e62616e0ecf111bda8"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==1.1.0"
     }
   },
@@ -1070,7 +1070,7 @@
         "sha256:25642c956049920a5aa49edcdd6ab1e06d7e5d467fc00e0506c44ac86fbfca02",
         "sha256:e6d2677a32f47fc7eb2795db1dd15c1f34eff616bcaf2cfb5e997f854fa1c4a6"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==4.3.0"
     },
     "virtualenv": {
