@@ -31,6 +31,7 @@ Optional:
      - Make sure your repositories are up-to-date `sudo apt-get update`
      - Upgrade any installed packages that are out of date `sudo apt-get upgrade`
      - Install pip and git `sudo apt install -y python3-pip git`
+     - Install Selnenium `sudo apt install chromium-driver`
 
 ### Linux/MacOS/Raspberry (terminal)
 - Create a PostgreSQL database named `amiibot` or skip this step if using sqlite
