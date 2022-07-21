@@ -6,7 +6,7 @@
     "host": "127.0.0.1",
     "port": 5432,
     "name": "amiibot"
-  }
+  },
   "messengers": {
     "messenger_1": {
       "active": true,
