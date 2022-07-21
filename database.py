@@ -106,7 +106,7 @@ class Database:
                     matched = True
                     if datum["Price"] != item.Price:
                         datum["Stock"] = Stock.PRICE_CHANGE.value
-                        datum["Colour"] = 0x0000FF
+                        datum["Colour"] = 0xFFFFFF
                         log.info(
                             f"Price changed for {item.Title} from {item.Price} to {datum['Price']}"
                         )
