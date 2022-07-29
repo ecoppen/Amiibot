@@ -1,6 +1,7 @@
 import logging
 import secrets
 import time
+import urllib.error
 from enum import Enum
 from typing import Any, Union
 
@@ -37,7 +38,11 @@ class Stockist:
         return send_public_request(url=url, payload=payload)
 
     def scrape_with_selenium(self, url, payload):
-        chromedriver_autoinstaller.install()
+        try:
+            chromedriver_autoinstaller.install()
+        except urllib.error.URLError as e:
+            log.error(f"Error with chromedriver auto-installation - {e}")
+            return ""
 
         options = Options()
         options.headless = True
