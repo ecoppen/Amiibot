@@ -45,6 +45,9 @@ class CexUK(Stockist):
                         f"Invalid JSON: {exc.msg}, line {exc.lineno}, column {exc.colno}"
                     )
                     return all_found
+                except AttributeError as e:
+                    log.error(f"Invalid attribute: {e}")
+                    return all_found
 
                 if "response" in cards:
                     if "data" in cards["response"]:

@@ -28,8 +28,8 @@ class BestbuyCA(Stockist):
         except json.JSONDecodeError as exc:
             log.error(f"Invalid JSON: {exc.msg}, line {exc.lineno}, column {exc.colno}")
             return all_found
-        except AttributeError:
-            log.error("String returned instead of JSON, most likely timed out")
+        except AttributeError as e:
+            log.error(f"Invalid attribute: {e}")
             return all_found
 
         if "products" in cards:
