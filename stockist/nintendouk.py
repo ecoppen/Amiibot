@@ -71,7 +71,6 @@ class NintendoUK(Stockist):
 
                     if found not in all_found:
                         all_found.append(found)
-                self.params["offset"] += 24
             else:
                 log.info("Requests library failed, attempting with selenium")
                 self.base_url = (
@@ -148,5 +147,5 @@ class NintendoUK(Stockist):
 
                     if found not in all_found:
                         all_found.append(found)
-
+            self.params["offset"] += 24
         return all_found
