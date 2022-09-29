@@ -104,7 +104,7 @@ class Database:
             for datum in data:
                 if datum["URL"] == item.URL:
                     matched = True
-                    if datum["Price"] != item.Price:
+                    if float(datum["Price"]) != float(item.Price):
                         datum["Stock"] = Stock.PRICE_CHANGE.value
                         datum["Colour"] = 0xFFFFFF
                         log.info(
