@@ -62,7 +62,7 @@ class Database:
 
     def remove_currency(self, currency_string: str) -> float:
         trim = re.compile(r"[^\d.,]+")
-        return float(trim.sub("", currency_string))
+        return float(trim.sub("", str(currency_string)))
 
     def get_last_github_check(self):
         table_object = self.get_table_object(table_name="last_scraped")
