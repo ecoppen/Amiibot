@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 
 import sqlalchemy as db
@@ -59,6 +60,10 @@ class Database:
         self.Base.metadata.reflect(self.engine)  # type: ignore
         return self.Base.metadata.tables.get(table_name)  # type: ignore
 
+    def remove_currency(self, currency_string: str) -> float:
+        trim = re.compile(r"[^\d.,]+")
+        return float(trim.sub("", currency_string))
+
     def get_last_github_check(self):
         table_object = self.get_table_object(table_name="last_scraped")
         return self.session.query(table_object).filter_by(stockist="github.com").first()
@@ -104,7 +109,9 @@ class Database:
             for datum in data:
                 if datum["URL"] == item.URL:
                     matched = True
-                    if float(datum["Price"]) != float(item.Price):
+                    if self.remove_currency(datum["Price"]) != self.remove_currency(
+                        item.Price
+                    ):
                         datum["Stock"] = Stock.PRICE_CHANGE.value
                         datum["Colour"] = 0xFFFFFF
                         log.info(
