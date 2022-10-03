@@ -61,7 +61,7 @@ class Database:
         return self.Base.metadata.tables.get(table_name)  # type: ignore
 
     def remove_currency(self, currency_string: str) -> float:
-        trim = re.compile(r"[^\d.,]+")
+        trim = re.compile(r"[^\d.]+")
         return float(trim.sub("", str(currency_string)))
 
     def get_last_github_check(self):
