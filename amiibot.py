@@ -8,10 +8,14 @@ from messenger.manager import MessageManager
 from scraper import Scraper
 from stockist.manager import StockistManager
 
+logs_file = Path(Path().resolve(), "log.txt")
+logs_file.touch(exist_ok=True)
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     level=os.environ.get("LOGLEVEL", "INFO"),
+    handlers=[logging.FileHandler(logs_file), logging.StreamHandler()],
 )
 
 log = logging.getLogger(__name__)
