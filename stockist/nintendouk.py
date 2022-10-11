@@ -76,6 +76,8 @@ class NintendoUK(Stockist):
                         self.params["offset"] += 24
                         if self.params["offset"] > 500:
                             break
+            else:
+                break
         if len(all_found) == 0:
             log.info("Requests library failed, attempting with selenium")
             self.base_url = (
