@@ -25,6 +25,7 @@ class CexUK(Stockist):
 
     def get_amiibo(self):
         all_found = []
+        self.params["firstRecord"] = 1
 
         switch_params = [
             {"q": "amiibo figures", "categoryId": 997},
