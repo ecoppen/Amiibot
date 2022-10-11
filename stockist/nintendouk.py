@@ -27,6 +27,7 @@ class NintendoUK(Stockist):
     def get_amiibo(self):
         all_found = []
         complete = False
+        self.params["offset"] = 0
 
         while not complete:
             response = self.scrape(url=self.base_url, payload=self.params)
