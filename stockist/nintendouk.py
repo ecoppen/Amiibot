@@ -45,7 +45,7 @@ class NintendoUK(Stockist):
 
             if len(cards) > 0:
                 if "data" in [*cards]:
-                    if "products" in [*cards["data"]]:
+                    if "products" in cards["data"]:
                         if len(cards["data"]["products"]) == 0:
                             complete = True
                         for card in cards["data"]["products"]:
