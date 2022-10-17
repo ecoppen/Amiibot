@@ -67,7 +67,7 @@ class Discord(Messenger):
         for k, v in embed_data.items():
             if k in options_keys:
                 if k == "Image":
-                    options[options_keys[k]] = {"url": v}
+                    options[options_keys[k]] = {"url": v.replace(" ", "%20")}
                 else:
                     options[options_keys[k]] = v
 
