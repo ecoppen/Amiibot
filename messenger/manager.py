@@ -65,5 +65,6 @@ class MessageManager:
     def send_embed_message_to_all_messengers(self, embed_data):
         for messenger in self.all_messengers:
             if messenger.active:
-                messenger.send_embed_message(embed_data=embed_data)
+                response = messenger.send_embed_message(embed_data=embed_data)
+                log.info(response)
                 time.sleep(0.5)
