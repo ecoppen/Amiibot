@@ -123,7 +123,7 @@
         "sha256:5a3d016c7c547f69d6f81fb0db9449ce888b418b5b9952cc5e6e66843e9dd845",
         "sha256:83e9a75d1911279afd89352c68b45348559d1fc0506b054b346651b5e7fee29f"
       ],
-      "markers": "python_version >= '3.6'",
+      "markers": "python_full_version >= '3.6.0'",
       "version": "==2.1.1"
     },
     "chromedriver-autoinstaller": {
@@ -484,7 +484,7 @@
         "sha256:ad565f26ecb92588a3e43bc3d96164de84cd9902482b130d0ddbaa9664a85065",
         "sha256:b9acddd652b585d75b20477888c56642fdade28bdfd3579aa24a4d2c037dd736"
       ],
-      "markers": "python_version >= '3.7'",
+      "markers": "python_full_version >= '3.7.0'",
       "version": "==1.2.0"
     }
   },
@@ -545,7 +545,7 @@
         "sha256:5a3d016c7c547f69d6f81fb0db9449ce888b418b5b9952cc5e6e66843e9dd845",
         "sha256:83e9a75d1911279afd89352c68b45348559d1fc0506b054b346651b5e7fee29f"
       ],
-      "markers": "python_version >= '3.6'",
+      "markers": "python_full_version >= '3.6.0'",
       "version": "==2.1.1"
     },
     "click": {
