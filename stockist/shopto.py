@@ -14,7 +14,7 @@ class Shopto(Stockist):
 
         self.params = None
 
-    base_url = "https://www.shopto.net/en/nintendo-amiibo/"
+    base_url = "https://www.shopto.net/en/search/?input_search=amiibo"
     name = "Shopto"
 
     def get_amiibo(self):
