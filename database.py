@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 class Database:
     def __init__(self, config: Database_) -> None:
         if config.engine == "postgres":
-            engine_string = f"{config.username}:{config.password}@{config.host}:{config.port}/{config.name}"
+            engine_string = f"{config.username}:{config.password}@{config.host}:{config.port}/{config.name}"  # noqa: E501
             self.engine = db.create_engine("postgresql+psycopg2://" + engine_string)
         elif config.engine == "sqlite":
             self.engine = db.create_engine(
@@ -64,30 +64,18 @@ class Database:
         trim = re.compile(r"[^\d.]+")
         return float(trim.sub("", str(currency_string)))
 
-    def get_last_github_check(self):
-        table_object = self.get_table_object(table_name="last_scraped")
-        return self.session.query(table_object).filter_by(stockist="github.com").first()
-
-    def get_days_since_last_github_check(self):
-        if self.get_last_github_check() is None:
-            return 1
-        return abs(self.get_last_github_check()[1] - datetime.now()).days
-
     def update_or_insert_last_scraped(self, stockist):
         table_object = self.get_table_object(table_name="last_scraped")
         check = self.session.query(table_object).filter_by(stockist=stockist).first()
         if check is None:
-            self.engine.execute(table_object.insert().values(stockist=stockist))
+            with self.engine.connect() as conn:
+                conn.execute(table_object.insert().values(stockist=stockist))
         else:
             self.session.query(table_object).filter_by(stockist=stockist).update(
                 {"timestamp": datetime.now()}
             )
             self.session.commit()
             self.session.flush()
-
-    def check_first_run(self):
-        table_object = self.get_table_object(table_name="amiibo_stock")
-        return self.session.query(table_object).first()
 
     def check_then_add_or_update_amiibo(self, data):
         statistics = {"New": 0, "Updated": 0, "Deleted": 0}
@@ -115,7 +103,8 @@ class Database:
                         datum["Stock"] = Stock.PRICE_CHANGE.value
                         datum["Colour"] = 0xFFFFFF
                         log.info(
-                            f"Price changed for {item.Title} from {item.Price} to {datum['Price']}"
+                            f"Price changed for {item.Title} "
+                            f"from {item.Price} to {datum['Price']}"
                         )
                         statistics["Updated"] += 1
                         self.session.query(table_object).filter_by(URL=item.URL).update(
@@ -155,6 +144,8 @@ class Database:
                 self.engine.execute(table_object.insert().values(datum))
 
         log.info(
-            f"Added: {statistics['New']}, Updated: {statistics['Updated']}, Deleted: {statistics['Deleted']}"
+            f"Added: {statistics['New']}, "
+            f"Updated: {statistics['Updated']}, "
+            f"Deleted: {statistics['Deleted']}"
         )
         return output
