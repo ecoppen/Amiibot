@@ -40,7 +40,7 @@ class Database(BaseModel, use_enum_values=True, extra=Extra.forbid):
     engine: str = Databases.SQLITE  # type: ignore
     username: Optional[str]
     password: Optional[str]
-    host: Optional[IPvAnyAddress] = IPvAnyAddress.validate("127.0.0.1")  # type: ignore
+    host: Optional[IPvAnyAddress] = IPvAnyAddress._validate("127.0.0.1", "")  # type: ignore # noqa: E501
     port: Optional[int] = Field(5432, ge=1, le=65535)
     name: str = "amiiboalert"
 
