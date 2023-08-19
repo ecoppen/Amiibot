@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import logging
 import secrets
 
@@ -64,21 +65,23 @@ class UserAgent:
 
     def get_user_agents(self):
         agent = secrets.choice(self.base_agents)
+        log.info(f"Using {agent} to scrape for new agents >.>")
         headers = {"User-Agent": agent}
         try:
-            page = requests.get(
-                "https://developers.whatismybrowser.com/useragents/explore/software_type_specific/web-browser/",
-                headers=headers,
-            )
+            page = requests.get("https://www.useragents.me", headers=headers, timeout=5)
         except TimeoutError:
+            log.warning("User-agent scraper timeout")
             return self.base_agents
         except requests.exceptions.ConnectionError:
+            log.warning("User-agent connection error")
             return self.base_agents
         except requests.exceptions.HTTPError:
+            log.warning("User-agent HTTP error")
             return self.base_agents
 
         soup = BeautifulSoup(page.content, "html.parser")
-        agents = soup.find_all("a", class_="code")
+        agents = soup.find_all("textarea", class_="form-control")
         if len(agents) > 0:
-            self.base_agents = [link.string for link in agents]
+            self.base_agents = [link.string for link in agents[:25]]
+            log.info("Scraped 25 user-agents to use instead of default list")
         return self.base_agents
