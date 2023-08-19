@@ -4,23 +4,23 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-pydantic = "*"
-sqlalchemy = "*"
-requests = "*"
 beautifulsoup4 = "*"
-selenium = "*"
 chromedriver-autoinstaller = "*"
 psycopg2-binary = "*"
+pydantic = "*"
+requests = "*"
+selenium = "*"
+sqlalchemy = "*"
 
 [dev-packages]
-flake8 = "*"
-black = "*"
-pre-commit = "*"
 bandit = "*"
+black = "*"
 isort = "*"
-mypy = "*"
-sqlalchemy = {extras = ["mypy"], version = "*"}
 mkdocs-material = "*"
+mypy = "*"
+pre-commit = "*"
+ruff = "*"
+sqlalchemy = {extras = ["mypy"], version = "*"}
 
 [requires]
 python_version = "3.11"
