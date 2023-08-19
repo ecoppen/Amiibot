@@ -88,7 +88,8 @@ class Database:
             for datum in data:
                 log.info(f"Adding {datum['Title']}")
                 statistics["New"] += 1
-                self.engine.execute(table_object.insert().values(datum))
+                with self.engine.connect() as conn:
+                    conn.execute(table_object.insert().values(datum))
             log.info(f"New items saved: {statistics['New']}")
             return data
 
@@ -141,7 +142,8 @@ class Database:
                 output.append(datum)
                 log.info(f"Adding {datum['Title']}")
                 statistics["New"] += 1
-                self.engine.execute(table_object.insert().values(datum))
+                with self.engine.connect() as conn:
+                    conn.execute(table_object.insert().values(datum))
 
         log.info(
             f"Added: {statistics['New']}, "
