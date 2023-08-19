@@ -28,4 +28,5 @@ database = Database(config=config.database)
 messengers = MessageManager(config=config.messengers)
 stockists = StockistManager(messengers=messengers)
 scraper = Scraper(config=config, stockists=stockists, database=database)
-scraper._auto_scrape()
+
+scraper.scrape()
