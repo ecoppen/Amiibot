@@ -9,7 +9,6 @@ from pydantic import (
     HttpUrl,
     IPvAnyAddress,
     ValidationError,
-    validator,
 )
 from typing_extensions import Annotated
 
@@ -68,18 +67,6 @@ class Config(BaseModel, use_enum_values=True, extra=Extra.forbid):
     messengers: dict[
         str, Annotated[Union[Discord, Telegram], Field(discriminator="messenger_type")]
     ]
-    scrape_interval: int = 600
-    notify_first_run: bool = False
-    heartbeat: bool = True
-    check_version_daily: bool = True
-
-    @validator("scrape_interval")
-    def interval_amount(cls, v):
-        if v < 600:
-            raise ValueError(
-                "Scraping interval lower limit is 600 seconds (10 minutes), play nice and don't get banned"
-            )
-        return v
 
 
 def load_config(path):
