@@ -1,8 +1,6 @@
 import json
 import logging
 
-import requests  # type: ignore
-from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
 
@@ -45,7 +43,7 @@ class NintendoUK(Stockist):
 
             if len(cards) > 0:
                 if "data" in [*cards]:
-                    log.info(f'{cards["data"]}')
+                    log.debug(f'{cards["data"]}')
                     if cards["data"] is None:
                         log.warning("No data returned from API")
                         break
