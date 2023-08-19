@@ -1,17 +1,11 @@
 repos:
-- repo: https://github.com/PyCQA/isort
-  rev: 5.10.1
-  hooks:
-    - id: isort
-      args: ["--profile", "black"]
-
 - repo: https://github.com/PyCQA/bandit
-  rev: 1.7.4
+  rev: 1.7.5
   hooks:
     - id: bandit
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v2.3.0
+  rev: v4.4.0
   hooks:
     - id: end-of-file-fixer
     - id: check-added-large-files
@@ -20,30 +14,26 @@ repos:
         - "--autofix"
 
 - repo: https://github.com/ambv/black
-  rev: 22.3.0
+  rev: 23.7.0
   hooks:
     - id: black
       args:
         - --line-length=88
         - --include='\.pyi?$'
-      language_version: python3.10
+      language_version: python3.11
 
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v0.961
+  rev: v1.4.1
   hooks:
     - id: mypy
       additional_dependencies:
         - 'pydantic'
         - 'sqlalchemy[mypy]'
 
-
-- repo: https://github.com/PyCQA/flake8
-  rev: 4.0.1
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.0.280
   hooks:
-    - id: flake8
+    - id: ruff
       args:
-        - "--max-line-length=88"
-        - "--max-complexity=18"
-        - "--select=B,C,E,F,W,T4,B9"
-        - "--ignore=E203,E266,E501,W503,F403,F401,E402"
+        - --fix
