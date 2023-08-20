@@ -4,12 +4,37 @@ from datetime import datetime
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config.config import Database as Database_
 from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class AmiiboStock(Base):
+    __tablename__ = "amiibo_stock"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    Website: Mapped[str]
+    Title: Mapped[str]
+    Price: Mapped[str]
+    Stock: Mapped[str]
+    Colour: Mapped[str]
+    URL: Mapped[str]
+    Image: Mapped[str]
+    timestamp: Mapped[datetime]
+
+
+class LastScraped(Base):
+    __tablename__ = "last_scraped"
+
+    stockist: Mapped[str] = mapped_column(primary_key=True)
+    timestamp: Mapped[datetime]
 
 
 class Database:
@@ -69,7 +94,7 @@ class Database:
         check = self.session.query(table_object).filter_by(stockist=stockist).first()
         with self.session as session:
             if check is None:
-                update = self.LastScraped(
+                update = LastScraped(
                     stockist=stockist,
                 )
                 session.add(instance=update)
@@ -92,7 +117,7 @@ class Database:
                 for datum in data:
                     log.info(f"Adding {datum['Title']}")
                     statistics["New"] += 1
-                    amiibo = self.AmiiboStock(
+                    amiibo = AmiiboStock(
                         Website=datum["Website"],
                         title=datum["Title"],
                         Price=datum["Price"],
