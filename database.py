@@ -70,6 +70,7 @@ class Database:
         if check is None:
             with self.engine.connect() as conn:
                 conn.execute(table_object.insert().values(stockist=stockist))
+                self.session.commit()
         else:
             self.session.query(table_object).filter_by(stockist=stockist).update(
                 {"timestamp": datetime.now()}
@@ -90,6 +91,7 @@ class Database:
                 statistics["New"] += 1
                 with self.engine.connect() as conn:
                     conn.execute(table_object.insert().values(datum))
+                    self.session.commit()
             log.info(f"New items saved: {statistics['New']}")
             return data
 
@@ -144,6 +146,7 @@ class Database:
                 statistics["New"] += 1
                 with self.engine.connect() as conn:
                     conn.execute(table_object.insert().values(datum))
+                    self.session.commit()
 
         log.info(
             f"Added: {statistics['New']}, "
