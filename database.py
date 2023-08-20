@@ -119,7 +119,7 @@ class Database:
                     statistics["New"] += 1
                     amiibo = AmiiboStock(
                         Website=datum["Website"],
-                        title=datum["Title"],
+                        Title=datum["Title"],
                         Price=datum["Price"],
                         Stock=datum["Stock"],
                         Colour=datum["Colour"],
