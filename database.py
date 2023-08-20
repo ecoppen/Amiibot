@@ -67,14 +67,16 @@ class Database:
     def update_or_insert_last_scraped(self, stockist):
         table_object = self.get_table_object(table_name="last_scraped")
         check = self.session.query(table_object).filter_by(stockist=stockist).first()
-        if check is None:
-            with self.engine.connect() as conn:
-                conn.execute(table_object.insert().values(stockist=stockist))
-                self.session.commit()
-        else:
-            self.session.query(table_object).filter_by(stockist=stockist).update(
-                {"timestamp": datetime.now()}
-            )
+        with self.session as session:
+            if check is None:
+                update = self.LastScraped(
+                    stockist=stockist,
+                )
+                session.add(instance=update)
+            else:
+                self.session.query(table_object).filter_by(stockist=stockist).update(
+                    {"timestamp": datetime.now()}
+                )
             self.session.commit()
             self.session.flush()
 
@@ -86,12 +88,21 @@ class Database:
             self.session.query(table_object).filter_by(Website=data[0]["Website"]).all()
         )
         if len(check) == 0:
-            for datum in data:
-                log.info(f"Adding {datum['Title']}")
-                statistics["New"] += 1
-                with self.engine.connect() as conn:
-                    conn.execute(table_object.insert().values(datum))
-                    self.session.commit()
+            with self.session as session:
+                for datum in data:
+                    log.info(f"Adding {datum['Title']}")
+                    statistics["New"] += 1
+                    amiibo = self.AmiiboStock(
+                        Website=datum["Website"],
+                        title=datum["Title"],
+                        Price=datum["Price"],
+                        Stock=datum["Stock"],
+                        Colour=datum["Colour"],
+                        URL=datum["URL"],
+                        Image=datum["Image"],
+                    )
+                    session.add(instance=amiibo)
+                self.session.commit()
             log.info(f"New items saved: {statistics['New']}")
             return data
 
