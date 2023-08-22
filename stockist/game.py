@@ -1,6 +1,5 @@
 import logging
 
-import requests  # type: ignore
 from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
@@ -43,6 +42,9 @@ class Game(Stockist):
                 "img",
                 attrs={"class": lambda e: e.startswith("optimisedImg") if e else False},
             )
+            log.info(name)
+            log.info(price)
+            log.info(img)
             if name and price and img:
                 name = name[1]
                 price = price[0]
