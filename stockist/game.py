@@ -32,7 +32,7 @@ class Game(Stockist):
             response = self.scrape_with_selenium(url=self.base_url, payload=self.params)
             soup = BeautifulSoup(response, "html.parser")
             cards = soup.find_all("article", class_="product")
-
+        log.info(cards)
         for card in cards:
             name = card.find_all("a")
             price = card.find_all(
@@ -42,9 +42,6 @@ class Game(Stockist):
                 "img",
                 attrs={"class": lambda e: e.startswith("optimisedImg") if e else False},
             )
-            log.info(name)
-            log.info(price)
-            log.info(img)
             if name and price and img:
                 name = name[1]
                 price = price[0]
