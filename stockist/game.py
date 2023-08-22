@@ -31,8 +31,8 @@ class Game(Stockist):
             log.info("Requests library failed, attempting with selenium")
             response = self.scrape_with_selenium(url=self.base_url, payload=self.params)
             soup = BeautifulSoup(response, "html.parser")
+            log.info(soup)
             cards = soup.find_all("article", class_="product")
-        log.info(cards)
         for card in cards:
             name = card.find_all("a")
             price = card.find_all(
