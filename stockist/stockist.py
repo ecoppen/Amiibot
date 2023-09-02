@@ -1,14 +1,14 @@
 import logging
 import secrets
 import time
-import urllib.error
 from enum import Enum
 from typing import Any, Union
 
-import chromedriver_autoinstaller
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 from stockist.useragents import UserAgent
 from stockist.utils import send_public_request
@@ -38,11 +38,8 @@ class Stockist:
         return send_public_request(url=url, payload=payload)
 
     def scrape_with_selenium(self, url, payload):
-        try:
-            chromedriver_autoinstaller.install()
-        except urllib.error.URLError as e:
-            log.error(f"Error with chromedriver auto-installation - {e}")
-            return ""
+        chrome_path = ChromeDriverManager().install()
+        chrome_service = Service(chrome_path)
 
         options = Options()
         options.headless = True
@@ -54,7 +51,8 @@ class Stockist:
         options.add_argument("--no-sandbox")
         options.add_argument(f"user-agent={secrets.choice(user_agent_list)}")
         try:
-            driver = webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(options=options, service=chrome_service)
+            driver.implicitly_wait(5)
             driver.get(url)
         except WebDriverException as e:
             log.error(f"Selenium exception: {e.msg}")
