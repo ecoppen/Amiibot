@@ -10,7 +10,6 @@ pydantic = "*"
 requests = "*"
 selenium = "*"
 sqlalchemy = "*"
-webdriver-manager = "*"
 
 [dev-packages]
 bandit = "*"

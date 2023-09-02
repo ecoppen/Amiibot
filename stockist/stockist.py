@@ -7,8 +7,6 @@ from typing import Any, Union
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 from stockist.useragents import UserAgent
 from stockist.utils import send_public_request
@@ -38,9 +36,6 @@ class Stockist:
         return send_public_request(url=url, payload=payload)
 
     def scrape_with_selenium(self, url, payload):
-        chrome_path = ChromeDriverManager().install()
-        chrome_service = Service(chrome_path)
-
         options = Options()
         options.headless = True
         options.add_argument("start-maximized")
@@ -51,7 +46,7 @@ class Stockist:
         options.add_argument("--no-sandbox")
         options.add_argument(f"user-agent={secrets.choice(user_agent_list)}")
         try:
-            driver = webdriver.Chrome(options=options, service=chrome_service)
+            driver = webdriver.Chrome(options=options)
             driver.implicitly_wait(5)
             driver.get(url)
         except WebDriverException as e:
