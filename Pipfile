@@ -5,12 +5,12 @@ name = "pypi"
 
 [packages]
 beautifulsoup4 = "*"
-chromedriver-autoinstaller = "*"
-psycopg2-binary = "*"
+psycopg = {extras = ["binary"], version = "*"}
 pydantic = "*"
 requests = "*"
 selenium = "*"
 sqlalchemy = "*"
+webdriver-manager = "*"
 
 [dev-packages]
 bandit = "*"
