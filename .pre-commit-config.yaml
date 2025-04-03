@@ -1,11 +1,11 @@
 repos:
 - repo: https://github.com/PyCQA/bandit
-  rev: 1.7.5
+  rev: 1.8.3
   hooks:
     - id: bandit
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v4.4.0
+  rev: v5.0.0
   hooks:
     - id: end-of-file-fixer
     - id: check-added-large-files
@@ -14,17 +14,17 @@ repos:
         - "--autofix"
 
 - repo: https://github.com/ambv/black
-  rev: 23.7.0
+  rev: 25.1.0
   hooks:
     - id: black
       args:
         - --line-length=88
         - --include='\.pyi?$'
-      language_version: python3.11
+      language_version: python3.12
 
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.4.1
+  rev: v1.15.0
   hooks:
     - id: mypy
       additional_dependencies:
@@ -32,7 +32,7 @@ repos:
         - 'sqlalchemy[mypy]'
 
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.0.280
+  rev: v0.11.3
   hooks:
     - id: ruff
       args:

@@ -1,0 +1,27 @@
+[project]
+name = "amiibot"
+version = "1.0.1"
+description = "Amiibo stock checker"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "chromedriver-autoinstaller>=0.6.4",
+    "psycopg2-binary>=2.9.10",
+    "pydantic>=2.11.2",
+    "requests>=2.32.3",
+    "selenium>=4.30.0",
+    "sqlalchemy>=2.0.40",
+]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.8.2",
+    "black>=25.1.0",
+    "mypy>=1.15.0",
+    "pre-commit>=4.1.0",
+    "ruff>=0.9.6",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
