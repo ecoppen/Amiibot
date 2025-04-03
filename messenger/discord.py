@@ -43,14 +43,19 @@ class Discord(Messenger):
 
             for k, v in payload.items():
                 self.data["embeds"][0]["fields"].append(
-                    {"name": k, "value": v, "inline": True}
+                    {"name": k, "value": f"{v}", "inline": True}
                 )
             self.data["embeds"][0]["footer"] = {
                 "text": f"Amiibot - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 "icon_url": "https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png",
             }
+            log.info(f"Final embed data: {self.data}")
+            response = self.send_post(url=self.webhook_url, json=self.data)
 
-            return self.send_post(url=self.webhook_url, json=self.data)
+            if response and hasattr(response, "status_code"):
+                log.info(f"Discord API response status: {response.status_code}")
+
+            return response
 
         log.info(f"{self.name} (discord messenger) is inactive")
 
