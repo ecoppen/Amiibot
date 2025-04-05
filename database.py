@@ -125,6 +125,7 @@ class Database:
                         Colour=datum["Colour"],
                         URL=datum["URL"],
                         Image=datum["Image"],
+                        timestamp=datetime.now(),
                     )
                     session.add(instance=amiibo)
                 self.session.commit()
@@ -169,7 +170,6 @@ class Database:
                 statistics["Deleted"] += 1
                 self.session.query(table_object).filter_by(id=item.id).delete()
                 self.session.commit()
-                self.session.flush()
 
         for datum in data:
             matched = False
@@ -180,9 +180,9 @@ class Database:
                 output.append(datum)
                 log.info(f"Adding {datum['Title']}")
                 statistics["New"] += 1
-                with self.engine.connect() as conn:
-                    conn.execute(table_object.insert().values(datum))
-                    self.session.commit()
+                stmt = table_object.insert().values(datum)
+                self.session.execute(stmt)
+        self.session.commit()
 
         log.info(
             f"Added: {statistics['New']}, "
