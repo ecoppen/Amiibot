@@ -87,9 +87,7 @@ class StockistManager:
         stockist_check = self.check_for_one_stockist()
         if stockist_check:
             stockists = ", ".join([stockist.name for stockist in self.all_stockists])
-            self.messengers.send_message_to_all_messengers(
-                f"Now scraping {len(self.all_stockists)} site(s): {stockists}"
-            )
+            log.info(f"Now scraping {len(self.all_stockists)} site(s): {stockists}")
 
     def check_for_one_stockist(self):
         if len(self.all_stockists) < 1:

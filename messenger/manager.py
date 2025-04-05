@@ -29,7 +29,6 @@ class MessageManager:
                 self.all_messengers.append(discord)
                 if messenger_object.active:
                     log.info(f"{messenger_config} setup to send messages to Discord")
-                    discord.send_message(f"{messenger_config} initialised")
                 else:
                     log.info(
                         f"{messenger_config} is initialised as a Discord instance but will not send any messages"
