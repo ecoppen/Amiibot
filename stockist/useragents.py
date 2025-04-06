@@ -17,11 +17,17 @@ class UserAgent:
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
         ]
         self.base_agents = [
-            item.replace("\n", "").replace("\r", "") for item in self.base_agents
+            item.replace("\n", "").replace("\r", "").replace("\t", "")
+            for item in self.base_agents
         ]
 
     def get_user_agents(self):
-        agent = secrets.choice(self.base_agents).replace("\n", "").replace("\r", "")
+        agent = (
+            secrets.choice(self.base_agents)
+            .replace("\n", "")
+            .replace("\r", "")
+            .replace("\t", "")
+        )
         log.info(f"Using {agent} to scrape for new agents >.>")
         headers = {"User-Agent": agent}
         try:
@@ -40,7 +46,7 @@ class UserAgent:
         agents = soup.find_all("textarea", class_="form-control")
         if len(agents) > 0:
             self.base_agents = [
-                f"{link.string}".replace("\n", "").replace("\r", "")
+                f"{link.string}".replace("\n", "").replace("\r", "").replace("\t", "")
                 for link in agents[:25]
             ]
             log.info("Scraped 25 user-agents to use instead of default list")
