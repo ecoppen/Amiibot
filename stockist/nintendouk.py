@@ -48,7 +48,7 @@ class NintendoUK(Stockist):
                         log.warning("No data returned from API")
                         break
                     if "products" in cards["data"]:
-                        log.info(f'{cards["data"]["products"]}')
+                        log.debug(f'{cards["data"]["products"]}')
                         if len(cards["data"]["products"]) == 0:
                             complete = True
                         for card in cards["data"]["products"]:
