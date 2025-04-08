@@ -17,8 +17,7 @@ To run this bot it is recommended that you run a linux cloud instance however it
 
 - git
 - Python 3.9
-- pip (pip3)
-- pipenv
+- uv
 
 Optional:
 
@@ -30,7 +29,8 @@ Optional:
 
      - Make sure your repositories are up-to-date `sudo apt-get update`
      - Upgrade any installed packages that are out of date `sudo apt-get upgrade`
-     - Install pip and git `sudo apt install -y python3-pip git`
+     - Install git `sudo apt install -y git`
+     - Install uv `curl -LsSf https://astral.sh/uv/install.sh | sh`
      - Install Selenium `sudo apt install chromium-driver`
 
 ### Linux/MacOS/Raspberry (terminal)
@@ -41,10 +41,14 @@ Optional:
 - Create the config file from template `cp config.json.example config.json`
 - Populate the `config.json` files as required using a text editor e.g. `nano config.json`
 - Navigate back to the repo root `cd ..`
-- Install pipenv `pip install pipenv`
-- Install required packages `pipenv install`
-- Activate the environment `pipenv shell`
+- Install required packages `uv sync`
+- Activate the environment `uv shell`
 - Start the bot `python amiibot.py`
+- (Optional) Make the script executable `chmod +x amiibot_runner.sh`
+- (Optional) Add the script to crontab `crontab -e` and add the following line:
+```sh
+*/20 * * * * ~/Amiibot/amiibot_runner.sh
+```
 
 ### Developers
 - Install developer requirements from pipenv `pipenv install --dev`
