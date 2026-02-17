@@ -1,38 +1,42 @@
 repos:
 - repo: https://github.com/PyCQA/bandit
-  rev: 1.8.3
+  rev: 1.8.0
   hooks:
     - id: bandit
+      args: ['-ll', '--skip', 'B101', '-x', 'tests/']  # Skip assert warnings and tests dir
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v5.0.0
+  rev: v6.0.0
   hooks:
     - id: end-of-file-fixer
     - id: check-added-large-files
+    - id: trailing-whitespace
+    - id: check-yaml
+    - id: check-json
     - id: pretty-format-json
       args:
         - "--autofix"
 
 - repo: https://github.com/ambv/black
-  rev: 25.1.0
+  rev: 26.1.0
   hooks:
     - id: black
       args:
         - --line-length=88
         - --include='\.pyi?$'
-      language_version: python3.12
-
+      language_version: python3.13
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.15.0
+  rev: v1.19.1
   hooks:
     - id: mypy
       additional_dependencies:
         - 'pydantic'
         - 'sqlalchemy[mypy]'
+      args: ['--ignore-missing-imports']
 
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.11.3
+  rev: v0.15.1
   hooks:
     - id: ruff
       args:

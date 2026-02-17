@@ -1,11 +1,29 @@
 site_name: Amiibot
+site_description: A Python web scraper and stock notifier for Amiibo
+site_author: ecoppen
+site_url: https://ecoppen.github.io/Amiibot
+
 extra:
   homepage: https://ecoppen.github.io/Amiibot
+  version: 2.0.0
+
 markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - toc:
+      permalink: true
+
 repo_url: https://github.com/ecoppen/Amiibot
+repo_name: ecoppen/Amiibot
+
 theme:
   name: material
   custom_dir: docs/material
@@ -15,14 +33,43 @@ theme:
   features:
     - navigation.tabs
     - navigation.top
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
     - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
   logo: amiibot_header.png
   palette:
     - scheme: default
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting Started: gettingstarted.md
+  - User Guide:
+      - Configuration: configuration.md
+  - Developer Guide:
+      - Testing: testing.md
+  - Deployment:
+      - Production Setup: deployment.md
+      - Troubleshooting: troubleshooting.md
+
+plugins:
+  - search:
+      lang: en
+
+extra_css:
+  - stylesheets/extra.css

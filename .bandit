@@ -1,0 +1,4 @@
+# Bandit configuration file
+[bandit]
+exclude_dirs = ['/tests', '.venv', 'venv', '.git']
+skips = ['B101']  # Skip assert_used warnings (needed in tests)

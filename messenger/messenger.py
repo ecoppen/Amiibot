@@ -1,26 +1,54 @@
 import logging
-from typing import Union
+from typing import Any, Optional, Union
 
 import requests  # type: ignore
+
+from constants import REQUEST_TIMEOUT
 
 log = logging.getLogger(__name__)
 
 
 class BlankResponse:
-    def __init__(self):
+    """Mock response object for failed requests."""
+
+    def __init__(self) -> None:
         self.content = ""
 
 
 class Messenger:
-    def __init__(self, name, stockists, active):
+    """Base messenger class for sending notifications."""
+
+    def __init__(self, name: str, stockists: list[str], active: bool) -> None:
+        """Initialize messenger.
+
+        Args:
+            name: Name identifier for the messenger
+            stockists: List of stockist URLs this messenger tracks
+            active: Whether this messenger is active
+        """
         self.name = name
         self.stockists = stockists
         self.active = active
         self.empty_response = BlankResponse()
 
-    messenger: Union[str, None] = None
+    messenger: Optional[str] = None
 
-    def send_post(self, url, json=None, timeout=5):
+    def send_post(
+        self,
+        url: str,
+        json: Optional[dict[str, Any]] = None,
+        timeout: int = REQUEST_TIMEOUT,
+    ) -> Union[requests.Response, BlankResponse]:
+        """Send a POST request with error handling.
+
+        Args:
+            url: URL to POST to
+            json: JSON data to send
+            timeout: Request timeout in seconds
+
+        Returns:
+            Response object or BlankResponse on error
+        """
         try:
             response = requests.post(url, json=json, timeout=timeout)
             return response
@@ -34,7 +62,22 @@ class Messenger:
             log.warning(f"Request exception: {e}")
             return self.empty_response
 
-    def send_get(self, url, params=None, timeout=5):
+    def send_get(
+        self,
+        url: str,
+        params: Optional[dict[str, Any]] = None,
+        timeout: int = REQUEST_TIMEOUT,
+    ) -> Union[requests.Response, BlankResponse]:
+        """Send a GET request with error handling.
+
+        Args:
+            url: URL to GET from
+            params: Query parameters
+            timeout: Request timeout in seconds
+
+        Returns:
+            Response object or BlankResponse on error
+        """
         try:
             response = requests.get(url, params=params, timeout=timeout)
             return response

@@ -1,5 +1,5 @@
 import logging
-from typing import Union
+from typing import Any
 
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
@@ -14,26 +14,28 @@ from stockist.thesource import TheSource
 
 log = logging.getLogger(__name__)
 
+# Stockist factory mapping
+STOCKIST_FACTORY = {
+    "bestbuy.com": Bestbuy,
+    "bestbuy.ca": BestbuyCA,
+    "gamestop.com": Gamestop,
+    "game.co.uk": Game,
+    "meccha-japan.com": MecchaJapan,
+    "nintendo.co.uk": NintendoUK,
+    "play-asia.com": PlayAsia,
+    "shopto.net": Shopto,
+    "thesource.ca": TheSource,
+    "uk.webuy.com": CexUK,
+}
+
 
 class StockistManager:
-    def __init__(self, messengers) -> None:
-        self.all_stockists: list[
-            Union[
-                Bestbuy,
-                BestbuyCA,
-                CexUK,
-                Game,
-                Gamestop,
-                MecchaJapan,
-                NintendoUK,
-                PlayAsia,
-                Shopto,
-                TheSource,
-            ]
-        ] = []
+    def __init__(self, messengers: Any) -> None:
+        self.all_stockists: list[Any] = []
         self.messengers = messengers
         self.relationships: dict[str, list[str]] = {}
 
+        # Build relationships between messengers and stockists
         for messenger in messengers.all_messengers:
             for stockist in messenger.stockists:
                 if stockist not in self.relationships:
@@ -41,56 +43,28 @@ class StockistManager:
                 if messenger.name not in self.relationships[stockist]:
                     self.relationships[stockist].append(messenger.name)
 
-        for stockist in self.relationships:
-            messengers = self.relationships[stockist]
-            if stockist == "bestbuy.com":
-                bestbuy = Bestbuy(messengers=messengers)
-                self.all_stockists.append(bestbuy)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "bestbuy.ca":
-                bestbuyca = BestbuyCA(messengers=messengers)
-                self.all_stockists.append(bestbuyca)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "gamestop.com":
-                gamestop = Gamestop(messengers=messengers)
-                self.all_stockists.append(gamestop)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "game.co.uk":
-                game = Game(messengers=messengers)
-                self.all_stockists.append(game)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "meccha-japan.com":
-                mecchajapan = MecchaJapan(messengers=messengers)
-                self.all_stockists.append(mecchajapan)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "nintendo.co.uk":
-                nintendouk = NintendoUK(messengers=messengers)
-                self.all_stockists.append(nintendouk)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "play-asia.com":
-                playasia = PlayAsia(messengers=messengers)
-                self.all_stockists.append(playasia)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "shopto.net":
-                shopto = Shopto(messengers=messengers)
-                self.all_stockists.append(shopto)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "thesource.ca":
-                thesource = TheSource(messengers=messengers)
-                self.all_stockists.append(thesource)
-                log.info(f"Now tracking {stockist}")
-            elif stockist == "uk.webuy.com":
-                cexuk = CexUK(messengers=messengers)
-                self.all_stockists.append(cexuk)
-                log.info(f"Now tracking {stockist}")
+        # Instantiate stockists using factory
+        for stockist_url, messenger_names in self.relationships.items():
+            if stockist_url not in STOCKIST_FACTORY:
+                log.warning(f"Unknown stockist URL: {stockist_url}. Skipping.")
+                continue
 
-        stockist_check = self.check_for_one_stockist()
-        if stockist_check:
-            stockists = ", ".join([stockist.name for stockist in self.all_stockists])
-            log.info(f"Now scraping {len(self.all_stockists)} site(s): {stockists}")
+            stockist_class = STOCKIST_FACTORY[stockist_url]
+            try:
+                stockist_instance = stockist_class(messengers=messenger_names)
+                self.all_stockists.append(stockist_instance)
+                log.info(f"Now tracking {stockist_url}")
+            except Exception as e:
+                log.error(f"Failed to instantiate stockist {stockist_url}: {e}")
 
-    def check_for_one_stockist(self):
+        self._validate_stockists()
+
+    def _validate_stockists(self) -> bool:
+        """Validate that at least one stockist was initialized."""
         if len(self.all_stockists) < 1:
             log.error("No stockists were set to be scraped")
             return False
+
+        stockist_names = ", ".join([stockist.name for stockist in self.all_stockists])
+        log.info(f"Now scraping {len(self.all_stockists)} site(s): {stockist_names}")
         return True

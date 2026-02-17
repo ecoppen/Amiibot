@@ -1,7 +1,8 @@
 import logging
 import time
-from typing import Union
+from typing import Any, Union
 
+from constants import MESSAGE_SEND_DELAY
 from messenger.discord import Discord
 from messenger.telegram import Telegram
 
@@ -9,7 +10,15 @@ log = logging.getLogger(__name__)
 
 
 class MessageManager:
-    def __init__(self, config) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize message manager with messenger configurations.
+
+        Args:
+            config: Dictionary of messenger configurations
+
+        Raises:
+            ValueError: If duplicate messenger names are used
+        """
         self.all_messengers: list[Union[Discord, Telegram]] = []
         self.messenger_names: list[str] = []
 
@@ -51,19 +60,36 @@ class MessageManager:
                     )
         self.check_for_one_messenger()
 
-    def check_for_one_messenger(self):
+    def check_for_one_messenger(self) -> bool:
+        """Validate that at least one messenger was configured.
+
+        Returns:
+            True if at least one messenger is configured
+        """
         if len(self.all_messengers) < 1:
             log.error("No messengers were set to true")
+            return False
+        return True
 
-    def send_message_to_all_messengers(self, message):
+    def send_message_to_all_messengers(self, message: str) -> None:
+        """Send a text message to all active messengers.
+
+        Args:
+            message: Message text to send
+        """
         for messenger in self.all_messengers:
             if messenger.active:
                 messenger.send_message(message=message)
-                time.sleep(0.5)
+                time.sleep(MESSAGE_SEND_DELAY)
 
-    def send_embed_message_to_all_messengers(self, embed_data):
+    def send_embed_message_to_all_messengers(self, embed_data: dict[str, Any]) -> None:
+        """Send an embedded message to all active messengers.
+
+        Args:
+            embed_data: Dictionary containing message data
+        """
         for messenger in self.all_messengers:
             if messenger.active:
                 response = messenger.send_embed_message(embed_data=embed_data)
                 log.info(response)
-                time.sleep(0.5)
+                time.sleep(MESSAGE_SEND_DELAY)
