@@ -1,8 +1,6 @@
 import json
 import logging
 
-import requests  # type: ignore
-from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
 
@@ -34,13 +32,20 @@ class BestbuyCA(Stockist):
 
         if "products" in cards:
             for card in cards["products"]:
+                # Convert price to string with currency symbol
+                price_value = card["salePrice"]
+                price = (
+                    f"${price_value:.2f}"
+                    if isinstance(price_value, (int, float))
+                    else str(price_value)
+                )
 
                 found = {
                     "Colour": 0x00FF00,
                     "Title": card["name"].strip(),
                     "Image": card["thumbnailImage"].strip(),
                     "URL": f"https://www.bestbuy.ca{card['productUrl'].strip()}",
-                    "Price": card["salePrice"],
+                    "Price": price,
                     "Stock": Stock.IN_STOCK.value,
                     "Website": self.name,
                 }

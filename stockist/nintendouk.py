@@ -53,7 +53,13 @@ class NintendoUK(Stockist):
                             complete = True
                         for card in cards["data"]["products"]:
                             name = card["name"]
-                            price = card["pricePerUnit"]
+                            price_value = card["pricePerUnit"]
+                            # Convert float price to string with currency symbol
+                            price = (
+                                f"£{price_value:.2f}"
+                                if isinstance(price_value, (int, float))
+                                else str(price_value)
+                            )
                             img = card["c_productImages"][0]
                             url = card["path"]
                             stock = card["c_availabilityModel"]["type"]
