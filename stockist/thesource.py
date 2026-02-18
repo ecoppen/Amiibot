@@ -1,6 +1,5 @@
 import logging
 
-import requests  # type: ignore
 from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
@@ -40,9 +39,9 @@ class TheSource(Stockist):
                 name = card.find_all(
                     "div",
                     attrs={
-                        "class": lambda e: e.startswith("productMainLink")
-                        if e
-                        else False
+                        "class": lambda e: (
+                            e.startswith("productMainLink") if e else False
+                        )
                     },
                 )
                 if name:

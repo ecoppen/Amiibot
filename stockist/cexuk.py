@@ -1,7 +1,6 @@
 import json
 import logging
 
-import requests  # type: ignore
 
 from stockist.stockist import Stock, Stockist
 

@@ -1,6 +1,5 @@
 import logging
 
-import requests  # type: ignore
 from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist

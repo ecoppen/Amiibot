@@ -1,6 +1,5 @@
 import logging
 
-import requests  # type: ignore
 from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
@@ -49,9 +48,9 @@ class Bestbuy(Stockist):
             price = card.find_all(
                 "div",
                 attrs={
-                    "class": lambda e: e.startswith("priceView-hero-price")
-                    if e
-                    else False
+                    "class": lambda e: (
+                        e.startswith("priceView-hero-price") if e else False
+                    )
                 },
             )
 

@@ -1,6 +1,5 @@
 import logging
 
-import requests  # type: ignore
 from bs4 import BeautifulSoup
 
 from stockist.stockist import Stock, Stockist
@@ -34,9 +33,9 @@ class Shopto(Stockist):
             name = card.find_all(
                 "div",
                 attrs={
-                    "class": lambda e: e.startswith("itemlist__description")
-                    if e
-                    else False
+                    "class": lambda e: (
+                        e.startswith("itemlist__description") if e else False
+                    )
                 },
             )
             stock = card.find_all(
@@ -51,9 +50,9 @@ class Shopto(Stockist):
             url = card.find_all(
                 "a",
                 attrs={
-                    "class": lambda e: e.startswith("itemlist__container")
-                    if e
-                    else False
+                    "class": lambda e: (
+                        e.startswith("itemlist__container") if e else False
+                    )
                 },
             )
 
