@@ -33,6 +33,7 @@ repos:
       additional_dependencies:
         - 'pydantic'
         - 'sqlalchemy[mypy]'
+        - 'types-requests'
       args: ['--ignore-missing-imports']
 
 - repo: https://github.com/astral-sh/ruff-pre-commit
