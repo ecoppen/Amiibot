@@ -10,11 +10,11 @@ Amiibot uses **pytest** for unit testing with coverage reporting. Tests run auto
 
 ## Current Coverage
 
-[![codecov](https://codecov.io/gh/username/Amiibot/branch/main/graph/badge.svg)](https://codecov.io/gh/username/Amiibot)
+[![codecov](https://codecov.io/gh/ecoppen/Amiibot/branch/main/graph/badge.svg)](https://codecov.io/gh/ecoppen/Amiibot)
 
 ## Coverage Graph
 
-![Coverage Graph](https://codecov.io/gh/username/Amiibot/branch/main/graphs/sunburst.svg)
+![Coverage Graph](https://codecov.io/gh/ecoppen/Amiibot/branch/main/graphs/sunburst.svg)
 
 ---
 
