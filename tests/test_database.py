@@ -300,13 +300,141 @@ class TestDatabase:
         database.check_then_add_or_update_amiibo(initial_data)
 
         # Update with only one item (second is delisted)
+        # First miss: not delisted yet (grace period = 2)
         updated_data = [initial_data[0]]
         result = database.check_then_add_or_update_amiibo(updated_data)
+        delisted = [r for r in result if r["Stock"] == "Delisted"]
+        assert len(delisted) == 0, "Should not delist on first miss"
 
-        # Should have one delisted item
+        # Second miss: now it should be delisted
+        result = database.check_then_add_or_update_amiibo(updated_data)
         delisted = [r for r in result if r["Stock"] == "Delisted"]
         assert len(delisted) == 1
         assert delisted[0]["Title"] == "Test Amiibo 2"
+
+    def test_delisting_grace_period_reset_on_reappearance(self, database):
+        """Test that missed_count resets when a previously-missing item reappears."""
+        initial_data = [
+            {
+                "Title": "Test Amiibo",
+                "Price": "$19.99",
+                "Stock": "In stock",
+                "URL": "https://test.com/grace",
+                "Website": "test_grace.com",
+                "Image": "https://test.com/img.jpg",
+                "Colour": 0x00FF00,
+            }
+        ]
+        database.check_then_add_or_update_amiibo(initial_data)
+
+        # First miss: item missing from scrape
+        result = database.check_then_add_or_update_amiibo([])
+        delisted = [r for r in result if r["Stock"] == "Delisted"]
+        assert len(delisted) == 0, "Should not delist on first miss"
+
+        # Item reappears — missed_count should reset to 0
+        database.check_then_add_or_update_amiibo(initial_data)
+        # Should still exist in DB, not be treated as a new item or delisted
+        with database.Session() as session:
+            item = (
+                session.query(AmiiboStock)
+                .filter_by(URL="https://test.com/grace")
+                .first()
+            )
+            assert item is not None
+            assert item.missed_count == 0
+
+    def test_skip_delisting_parameter(self, database):
+        """Test that skip_delisting=True prevents delisting entirely."""
+        initial_data = [
+            {
+                "Title": "Test Amiibo 1",
+                "Price": "$19.99",
+                "Stock": "In stock",
+                "URL": "https://test.com/skip1",
+                "Website": "test_skip.com",
+                "Image": "https://test.com/img1.jpg",
+                "Colour": 0x00FF00,
+            },
+            {
+                "Title": "Test Amiibo 2",
+                "Price": "$24.99",
+                "Stock": "In stock",
+                "URL": "https://test.com/skip2",
+                "Website": "test_skip.com",
+                "Image": "https://test.com/img2.jpg",
+                "Colour": 0x00FF00,
+            },
+        ]
+        database.check_then_add_or_update_amiibo(initial_data)
+
+        # Run multiple times with skip_delisting=True — item should never be delisted
+        updated_data = [initial_data[0]]
+        for _ in range(5):
+            result = database.check_then_add_or_update_amiibo(
+                updated_data, skip_delisting=True
+            )
+            delisted = [r for r in result if r["Stock"] == "Delisted"]
+            assert len(delisted) == 0, "skip_delisting should prevent delisting"
+
+        # Verify missed_count was NOT incremented
+        with database.Session() as session:
+            item = (
+                session.query(AmiiboStock)
+                .filter_by(URL="https://test.com/skip2")
+                .first()
+            )
+            assert item is not None
+            assert item.missed_count == 0
+
+    def test_get_last_item_count(self, database):
+        """Test retrieving the last item count for a stockist."""
+        stockist = "test_count.com"
+        assert database.get_last_item_count(stockist) == 0
+
+        database.update_or_insert_last_scraped(stockist, item_count=42)
+        assert database.get_last_item_count(stockist) == 42
+
+    def test_notification_suppression_cooldown(self, database):
+        """Test that notifications are suppressed within the cooldown period."""
+        data = [
+            {
+                "Title": "Test Amiibo",
+                "Price": "$19.99",
+                "Stock": "In stock",
+                "URL": "https://test.com/notify",
+                "Website": "test_notify.com",
+                "Image": "https://test.com/img.jpg",
+                "Colour": 0x00FF00,
+            }
+        ]
+        database.check_then_add_or_update_amiibo(data)
+
+        # Should not be suppressed initially (no prior notification)
+        assert not database.should_suppress_notification(
+            "https://test.com/notify", "test_notify.com", "In stock"
+        )
+
+        # Record a notification
+        database.record_notification(
+            "https://test.com/notify", "test_notify.com", "In stock"
+        )
+
+        # Should now be suppressed (same status within cooldown)
+        assert database.should_suppress_notification(
+            "https://test.com/notify", "test_notify.com", "In stock"
+        )
+
+        # Different status should NOT be suppressed
+        assert not database.should_suppress_notification(
+            "https://test.com/notify", "test_notify.com", "Delisted"
+        )
+
+    def test_notification_suppression_nonexistent_item(self, database):
+        """Test that suppression check returns False for items not in DB."""
+        assert not database.should_suppress_notification(
+            "https://nonexistent.com/item", "no_site.com", "In stock"
+        )
 
     def test_cleanup_old_records(self, database):
         """Test cleaning up old records."""

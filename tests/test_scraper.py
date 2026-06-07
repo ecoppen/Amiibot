@@ -23,9 +23,12 @@ class TestScraper:
         db.record_scraping_failure.return_value = 1
         db.record_scraping_success.return_value = None
         db.get_consecutive_failures.return_value = 0
+        db.get_last_item_count.return_value = 100
         db.update_or_insert_last_scraped.return_value = None
         db._validate_amiibo_data.return_value = True
         db.check_then_add_or_update_amiibo.return_value = []
+        db.should_suppress_notification.return_value = False
+        db.record_notification.return_value = None
         return db
 
     @pytest.fixture

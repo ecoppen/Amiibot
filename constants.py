@@ -71,7 +71,14 @@ MIN_ITEMS_THRESHOLD = 1
    assume scraping failure and skip database update to prevent false notifications."""
 
 SCRAPING_FAILURE_GRACE_PERIOD = 2
-"""Number of consecutive empty scrapes before treating as real delisting (not implemented yet)."""
+"""Number of consecutive misses before declaring an item as genuinely delisted."""
+
+STOCKIST_HEALTH_RATIO = 0.5
+"""If current scraped item count is less than this ratio of the previous count,
+   the stockist is considered unhealthy and delisting is skipped for that run."""
+
+NOTIFICATION_COOLDOWN_MINUTES = 60
+"""Minimum minutes between sending the same notification for an item with the same status."""
 
 # ============================================================================
 # DATABASE SETTINGS

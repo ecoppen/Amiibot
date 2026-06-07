@@ -4,7 +4,7 @@ from typing import Any
 
 import requests  # type: ignore
 
-from constants import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_FACTOR
+from constants import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_FACTOR, STOCKIST_HEALTH_RATIO
 
 log = logging.getLogger(__name__)
 
@@ -105,9 +105,6 @@ class Scraper:
             # Successful scrape! Record it
             self.database.record_scraping_success(stockist.name)
 
-            # Update last scraped timestamp
-            self.database.update_or_insert_last_scraped(stockist=stockist.name)
-
             # Validate scraped data before processing
             validated_items = []
             for item in scraped:
@@ -120,18 +117,59 @@ class Scraper:
             if not validated_items:
                 log.warning(f"No valid items from {stockist.name} after validation")
                 log.warning("Skipping database update to prevent false notifications")
+                self.database.update_or_insert_last_scraped(
+                    stockist=stockist.name, item_count=0
+                )
                 continue
 
+            # Stockist health check: skip delisting if item count is anomalously low
+            current_count = len(validated_items)
+            previous_count = self.database.get_last_item_count(stockist.name)
+            skip_delisting = False
+            if previous_count > 0:
+                ratio = current_count / previous_count
+                if ratio < STOCKIST_HEALTH_RATIO:
+                    log.warning(
+                        f"Stockist {stockist.name} may be unhealthy: "
+                        f"{current_count} items vs {previous_count} previous "
+                        f"(ratio {ratio:.2f} < {STOCKIST_HEALTH_RATIO}). "
+                        f"Skipping delisting for this run."
+                    )
+                    skip_delisting = True
+
+            # Update last scraped timestamp with current item count
+            self.database.update_or_insert_last_scraped(
+                stockist=stockist.name, item_count=current_count
+            )
+
             # Check and update database only if we have valid items
-            to_notify = self.database.check_then_add_or_update_amiibo(validated_items)
+            to_notify = self.database.check_then_add_or_update_amiibo(
+                validated_items, skip_delisting=skip_delisting
+            )
 
             if len(to_notify) == 0:
                 log.info(f"No changes detected for {stockist.name}")
                 continue
 
-            # Send notifications
-            log.info(f"Sending {len(to_notify)} notifications for {stockist.name}")
+            # Send notifications with cooldown suppression
+            suppressed = 0
             for messenger in self.messengers.all_messengers:
                 if messenger.name in stockist.messengers:
                     for item in to_notify:
+                        if self.database.should_suppress_notification(
+                            item["URL"], item["Website"], item["Stock"]
+                        ):
+                            log.info(
+                                f"Skipping notification for {item['Title']} (cooldown)"
+                            )
+                            suppressed += 1
+                            continue
                         messenger.send_embed_message(item)
+                        self.database.record_notification(
+                            item["URL"], item["Website"], item["Stock"]
+                        )
+            if suppressed:
+                log.info(
+                    f"Suppressed {suppressed} notification(s) for {stockist.name} "
+                    f"(cooldown)"
+                )

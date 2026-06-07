@@ -1,12 +1,13 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import sqlalchemy as db
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config.config import Database as Database_
+from constants import SCRAPING_FAILURE_GRACE_PERIOD, NOTIFICATION_COOLDOWN_MINUTES
 from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ class AmiiboStock(Base):
     URL: Mapped[str]
     Image: Mapped[str]
     timestamp: Mapped[datetime] = mapped_column(default=datetime.now)
+    missed_count: Mapped[int] = mapped_column(default=0)
+    last_notified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_notified_status: Mapped[str | None] = mapped_column(nullable=True)
 
 
 class LastScraped(Base):
@@ -35,6 +39,7 @@ class LastScraped(Base):
 
     stockist: Mapped[str] = mapped_column(primary_key=True)
     timestamp: Mapped[datetime] = mapped_column(default=datetime.now)
+    item_count: Mapped[int] = mapped_column(default=0)
 
 
 class ScrapingFailure(Base):
@@ -62,9 +67,85 @@ class Database:
 
         log.info(f"{config.engine} loaded")
 
+        self._engine_type = config.engine
+
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
+        self._run_migrations()
         log.info("database tables loaded")
+
+    def _run_migrations(self) -> None:
+        """Run schema migrations for new columns on existing databases."""
+        if self._engine_type == "sqlite":
+            with self.engine.connect() as conn:
+                result = conn.execute(db.text("PRAGMA table_info(amiibo_stock)"))
+                amiibo_cols = [row[1] for row in result]
+                if "missed_count" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN missed_count INTEGER DEFAULT 0"
+                        )
+                    )
+                if "last_notified_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_at TIMESTAMP"
+                        )
+                    )
+                if "last_notified_status" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
+                        )
+                    )
+                result = conn.execute(db.text("PRAGMA table_info(last_scraped)"))
+                scraped_cols = [row[1] for row in result]
+                if "item_count" not in scraped_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE last_scraped ADD COLUMN item_count INTEGER DEFAULT 0"
+                        )
+                    )
+                conn.commit()
+        elif self._engine_type == "postgres":
+            with self.engine.connect() as conn:
+                result = conn.execute(
+                    db.text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'amiibo_stock'"
+                    )
+                )
+                amiibo_cols = [row[0] for row in result]
+                if "missed_count" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN missed_count INTEGER DEFAULT 0"
+                        )
+                    )
+                if "last_notified_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_at TIMESTAMP"
+                        )
+                    )
+                if "last_notified_status" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
+                        )
+                    )
+                result = conn.execute(
+                    db.text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'last_scraped'"
+                    )
+                )
+                scraped_cols = [row[0] for row in result]
+                if "item_count" not in scraped_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE last_scraped ADD COLUMN item_count INTEGER DEFAULT 0"
+                        )
+                    )
+                conn.commit()
 
     def remove_currency(self, currency_string: str) -> float:
         """Extract numeric price from currency string.
@@ -126,14 +207,24 @@ class Database:
         except ValueError:
             raise ValueError(f"Could not extract price from: {currency_string}")
 
-    def update_or_insert_last_scraped(self, stockist: str) -> None:
+    def update_or_insert_last_scraped(
+        self, stockist: str, item_count: int | None = None
+    ) -> None:
         """Update or insert last scraped timestamp for a stockist."""
         with self.Session() as session:
             existing = session.query(LastScraped).filter_by(stockist=stockist).first()
             if existing is None:
-                session.add(LastScraped(stockist=stockist, timestamp=datetime.now()))
+                session.add(
+                    LastScraped(
+                        stockist=stockist,
+                        timestamp=datetime.now(),
+                        item_count=item_count if item_count is not None else 0,
+                    )
+                )
             else:
                 existing.timestamp = datetime.now()
+                if item_count is not None:
+                    existing.item_count = item_count
             session.commit()
 
     def record_scraping_failure(self, stockist: str) -> int:
@@ -203,6 +294,61 @@ class Database:
                 return 0
             return failure.consecutive_failures
 
+    def get_last_item_count(self, stockist: str) -> int:
+        """Get the item count from the last successful scrape of a stockist.
+
+        Args:
+            stockist: Name of the stockist
+
+        Returns:
+            Number of items from the last successful scrape (0 if unknown)
+        """
+        with self.Session() as session:
+            record = session.query(LastScraped).filter_by(stockist=stockist).first()
+            if record is None:
+                return 0
+            return record.item_count
+
+    def should_suppress_notification(self, url: str, website: str, stock: str) -> bool:
+        """Check if a notification should be suppressed due to cooldown.
+
+        Args:
+            url: Product URL
+            website: Website name
+            stock: Current stock status string
+
+        Returns:
+            True if notification should be suppressed
+        """
+        with self.Session() as session:
+            item = (
+                session.query(AmiiboStock).filter_by(URL=url, Website=website).first()
+            )
+            if item and item.last_notified_at:
+                cooldown_end = item.last_notified_at + timedelta(
+                    minutes=NOTIFICATION_COOLDOWN_MINUTES
+                )
+                if datetime.now() < cooldown_end and item.last_notified_status == stock:
+                    return True
+        return False
+
+    def record_notification(self, url: str, website: str, stock: str) -> None:
+        """Record that a notification was sent for an item.
+
+        Args:
+            url: Product URL
+            website: Website name
+            stock: Stock status that was notified
+        """
+        with self.Session() as session:
+            item = (
+                session.query(AmiiboStock).filter_by(URL=url, Website=website).first()
+            )
+            if item:
+                item.last_notified_at = datetime.now()
+                item.last_notified_status = stock
+                session.commit()
+
     def _get_existing_items(self, website: str) -> list[AmiiboStock]:
         """Retrieve all existing items for a website."""
         with self.Session() as session:
@@ -263,9 +409,15 @@ class Database:
         return added
 
     def check_then_add_or_update_amiibo(
-        self, data: list[dict[str, Any]]
+        self, data: list[dict[str, Any]], skip_delisting: bool = False
     ) -> list[dict[str, Any]]:
-        """Check and update amiibo stock in database."""
+        """Check and update amiibo stock in database.
+
+        Args:
+            data: List of validated amiibo data dicts from the scraper.
+            skip_delisting: If True, do not mark any items as delisted
+                (used when the scrape looks unhealthy / partial).
+        """
         if not data:
             return []
 
@@ -277,24 +429,21 @@ class Database:
             existing_items = session.query(AmiiboStock).filter_by(Website=website).all()
 
             if not existing_items:
-                # All items are new
                 new_items = self._add_new_items(session, data)
                 statistics["New"] = len(new_items)
                 log.info(f"New items saved: {statistics['New']}")
                 return data
 
-            # Build URL map for existing items for faster lookup
-            # Need to extract data before session closes
             existing_map = {
                 item.URL: (item.id, item.Price, item.Title, item.Image)
                 for item in existing_items
             }
             new_data_map = {datum["URL"]: datum for datum in data}
 
-            # Handle price changes and matches
             for item in existing_items:
                 if item.URL in new_data_map:
                     new_datum = new_data_map[item.URL]
+                    item.missed_count = 0
                     if self.remove_currency(new_datum["Price"]) != self.remove_currency(
                         item.Price
                     ):
@@ -302,17 +451,27 @@ class Database:
                         output.append(
                             self._handle_price_change(session, item, new_datum["Price"])
                         )
+                elif skip_delisting:
+                    log.debug(
+                        f"Skipping delisting check for {item.Title} (health check active)"
+                    )
                 else:
-                    # Item is delisted
-                    statistics["Deleted"] += 1
-                    output.append(self._handle_delisted_item(session, item))
+                    item.missed_count += 1
+                    log.info(
+                        f"{item.Title} missed {item.missed_count} time(s) "
+                        f"(grace: {SCRAPING_FAILURE_GRACE_PERIOD})"
+                    )
+                    if item.missed_count >= SCRAPING_FAILURE_GRACE_PERIOD:
+                        statistics["Deleted"] += 1
+                        output.append(self._handle_delisted_item(session, item))
 
-            # Handle new items
             new_items = [d for d in data if d["URL"] not in existing_map]
             if new_items:
                 added = self._add_new_items(session, new_items)
                 output.extend(added)
                 statistics["New"] = len(added)
+
+            session.commit()
 
         log.info(
             f"Added: {statistics['New']}, "
@@ -348,8 +507,6 @@ class Database:
         Returns:
             Number of records deleted
         """
-        from datetime import timedelta
-
         cutoff_date = datetime.now() - timedelta(days=days_old)
 
         with self.Session() as session:
