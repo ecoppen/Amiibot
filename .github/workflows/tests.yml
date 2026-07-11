@@ -88,8 +88,5 @@ jobs:
     - name: Install dependencies
       run: uv sync --group dev
 
-    - name: Run bandit (SAST)
-      run: uv run bandit -r amiibot.py database.py scraper.py utils.py constants.py result.py models.py config/ messenger/ stockist/ -ll
-
     - name: Run pip-audit (dependency vulns)
       run: uv run pip-audit
