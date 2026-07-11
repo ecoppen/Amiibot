@@ -27,5 +27,20 @@ dev = [
 ]
 
 [tool.pyright]
+typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
+include = ["amiibot.py", "scraper.py", "database.py", "utils.py", "constants.py", "result.py"]
+exclude = ["tests", "site", "docs", "htmlcov", "__pycache__", ".mypy_cache", ".ruff_cache"]
+reportMissingTypeStubs = false
+reportMissingImports = true
+reportUnusedImport = true
+reportUnusedVariable = true
+reportOptionalMemberAccess = true
+reportArgumentType = true
+reportAttributeAccessIssue = true
+reportCallIssue = true
+reportGeneralTypeIssues = true
+reportOptionalIterable = true
+reportOptionalSubscript = true
+reportPrivateUsage = true

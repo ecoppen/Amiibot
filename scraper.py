@@ -5,7 +5,12 @@ from typing import Any
 
 import requests  # type: ignore
 
-from constants import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_FACTOR, STOCKIST_HEALTH_RATIO
+from constants import (
+    CONSECUTIVE_UNHEALTHY_THRESHOLD,
+    MAX_RETRY_ATTEMPTS,
+    RETRY_BACKOFF_FACTOR,
+    STOCKIST_HEALTH_RATIO,
+)
 from result import FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
@@ -102,15 +107,15 @@ class Scraper:
                     f"Consecutive failures: {failure_count}"
                 )
 
-                self.database.update_or_insert_last_scraped(stockist=stockist.name)
+                self.database.record_scrape_attempt(stockist=stockist.name)
                 failed += 1
                 continue
 
             log.info(f"Scraped {len(scraped)} items from {stockist.name}")
 
-            if len(scraped) == 0:
-                failure_count = self.database.get_consecutive_failures(stockist.name)
+            self.database.record_scrape_attempt(stockist=stockist.name)
 
+            if len(scraped) == 0:
                 failure_count = self.database.record_scraping_failure(stockist.name)
 
                 log.warning(
@@ -119,11 +124,8 @@ class Scraper:
                     f"Skipping database update to prevent false 'delisted' notifications."
                 )
 
-                self.database.update_or_insert_last_scraped(stockist=stockist.name)
                 failed += 1
                 continue
-
-            self.database.record_scraping_success(stockist.name)
 
             validated_items = []
             for item in scraped:
@@ -136,29 +138,43 @@ class Scraper:
             if not validated_items:
                 log.warning(f"No valid items from {stockist.name} after validation")
                 log.warning("Skipping database update to prevent false notifications")
-                self.database.update_or_insert_last_scraped(
-                    stockist=stockist.name, item_count=0
-                )
-                succeeded += 1
+                self.database.record_scraping_failure(stockist.name)
+                failed += 1
                 continue
 
-            current_count = len(validated_items)
-            previous_count = self.database.get_last_item_count(stockist.name)
-            skip_delisting = False
-            if previous_count > 0:
-                ratio = current_count / previous_count
-                if ratio < STOCKIST_HEALTH_RATIO:
-                    log.warning(
-                        f"Stockist {stockist.name} may be unhealthy: "
-                        f"{current_count} items vs {previous_count} previous "
-                        f"(ratio {ratio:.2f} < {STOCKIST_HEALTH_RATIO}). "
-                        f"Skipping delisting for this run."
-                    )
-                    skip_delisting = True
+            self.database.record_scraping_success(stockist.name)
 
-            self.database.update_or_insert_last_scraped(
-                stockist=stockist.name, item_count=current_count
-            )
+            current_count = len(validated_items)
+            healthy_count = self.database.get_last_healthy_count(stockist.name)
+            skip_delisting = False
+
+            if healthy_count > 0:
+                ratio = current_count / healthy_count
+                if ratio < STOCKIST_HEALTH_RATIO:
+                    unhealthy_obs = self.database.record_unhealthy_scrape(stockist.name)
+
+                    if unhealthy_obs < CONSECUTIVE_UNHEALTHY_THRESHOLD:
+                        log.warning(
+                            f"Stockist {stockist.name} may be unhealthy: "
+                            f"{current_count} items vs {healthy_count} baseline "
+                            f"(ratio {ratio:.2f} < {STOCKIST_HEALTH_RATIO}). "
+                            f"Skipping delisting. "
+                            f"({unhealthy_obs}/{CONSECUTIVE_UNHEALTHY_THRESHOLD} unhealthy observations)"
+                        )
+                        skip_delisting = True
+                    else:
+                        log.warning(
+                            f"Stockist {stockist.name}: accepting new baseline of "
+                            f"{current_count} items (previous: {healthy_count}) after "
+                            f"{unhealthy_obs} low observations"
+                        )
+                        self.database.record_healthy_scrape(
+                            stockist.name, current_count
+                        )
+                else:
+                    self.database.record_healthy_scrape(stockist.name, current_count)
+            else:
+                self.database.record_healthy_scrape(stockist.name, current_count)
 
             to_notify = self.database.check_then_add_or_update_amiibo(
                 validated_items, skip_delisting=skip_delisting

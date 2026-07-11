@@ -136,28 +136,24 @@ class TestDatabase:
         with pytest.raises(ValueError, match="Invalid field types"):
             database._validate_amiibo_data(invalid_data)
 
-    def test_update_or_insert_last_scraped(self, database):
-        """Test updating last scraped timestamp."""
+    def test_record_scrape_attempt(self, database):
         stockist = "test.com"
 
-        # First insert
-        database.update_or_insert_last_scraped(stockist)
+        database.record_scrape_attempt(stockist)
 
-        # Verify it was inserted
         with database.Session() as session:
             record = session.query(LastScraped).filter_by(stockist=stockist).first()
             assert record is not None
             assert record.stockist == stockist
-            first_timestamp = record.timestamp
+            assert record.last_attempt_at is not None
+            first_attempt = record.last_attempt_at
 
-        # Update
-        database.update_or_insert_last_scraped(stockist)
+        database.record_scrape_attempt(stockist)
 
-        # Verify it was updated
         with database.Session() as session:
             record = session.query(LastScraped).filter_by(stockist=stockist).first()
             assert record is not None
-            assert record.timestamp >= first_timestamp
+            assert record.last_attempt_at >= first_attempt
 
     def test_get_statistics(self, database):
         """Test getting database statistics."""
@@ -387,13 +383,46 @@ class TestDatabase:
             assert item is not None
             assert item.missed_count == 0
 
-    def test_get_last_item_count(self, database):
-        """Test retrieving the last item count for a stockist."""
+    def test_get_last_healthy_count(self, database):
         stockist = "test_count.com"
-        assert database.get_last_item_count(stockist) == 0
+        assert database.get_last_healthy_count(stockist) == 0
 
-        database.update_or_insert_last_scraped(stockist, item_count=42)
-        assert database.get_last_item_count(stockist) == 42
+        database.record_healthy_scrape(stockist, 42)
+        assert database.get_last_healthy_count(stockist) == 42
+
+    def test_get_consecutive_unhealthy_obs(self, database):
+        stockist = "test_unhealthy.com"
+        assert database.get_consecutive_unhealthy_obs(stockist) == 0
+
+        count = database.record_unhealthy_scrape(stockist)
+        assert count == 1
+        assert database.get_consecutive_unhealthy_obs(stockist) == 1
+
+        count = database.record_unhealthy_scrape(stockist)
+        assert count == 2
+        assert database.get_consecutive_unhealthy_obs(stockist) == 2
+
+    def test_healthy_scrape_resets_unhealthy_obs(self, database):
+        stockist = "test_reset.com"
+
+        database.record_unhealthy_scrape(stockist)
+        database.record_unhealthy_scrape(stockist)
+        assert database.get_consecutive_unhealthy_obs(stockist) == 2
+
+        database.record_healthy_scrape(stockist, 10)
+        assert database.get_consecutive_unhealthy_obs(stockist) == 0
+        assert database.get_last_healthy_count(stockist) == 10
+
+    def test_record_healthy_scrape_sets_last_success(self, database):
+        stockist = "test_success.com"
+
+        database.record_healthy_scrape(stockist, 25)
+
+        with database.Session() as session:
+            record = session.query(LastScraped).filter_by(stockist=stockist).first()
+            assert record is not None
+            assert record.last_success_at is not None
+            assert record.last_healthy_count == 25
 
     def test_notification_suppression_cooldown(self, database):
         """Test that notifications are suppressed within the cooldown period."""

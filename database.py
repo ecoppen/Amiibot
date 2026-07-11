@@ -7,7 +7,10 @@ import sqlalchemy as db
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config.config import Database as Database_
-from constants import SCRAPING_FAILURE_GRACE_PERIOD, NOTIFICATION_COOLDOWN_MINUTES
+from constants import (
+    NOTIFICATION_COOLDOWN_MINUTES,
+    SCRAPING_FAILURE_GRACE_PERIOD,
+)
 from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
@@ -38,8 +41,10 @@ class LastScraped(Base):
     __tablename__ = "last_scraped"
 
     stockist: Mapped[str] = mapped_column(primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(default=datetime.now)
-    item_count: Mapped[int] = mapped_column(default=0)
+    last_attempt_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    last_success_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_healthy_count: Mapped[int] = mapped_column(default=0)
+    consecutive_unhealthy_obs: Mapped[int] = mapped_column(default=0)
 
 
 class ScrapingFailure(Base):
@@ -75,7 +80,6 @@ class Database:
         log.info("database tables loaded")
 
     def _run_migrations(self) -> None:
-        """Run schema migrations for new columns on existing databases."""
         if self._engine_type == "sqlite":
             with self.engine.connect() as conn:
                 result = conn.execute(db.text("PRAGMA table_info(amiibo_stock)"))
@@ -100,10 +104,42 @@ class Database:
                     )
                 result = conn.execute(db.text("PRAGMA table_info(last_scraped)"))
                 scraped_cols = [row[1] for row in result]
-                if "item_count" not in scraped_cols:
+                if "last_attempt_at" not in scraped_cols:
+                    if "timestamp" in scraped_cols:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped RENAME COLUMN timestamp TO last_attempt_at"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                            )
+                        )
+                if "last_healthy_count" not in scraped_cols:
+                    if "item_count" in scraped_cols:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped RENAME COLUMN item_count TO last_healthy_count"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped ADD COLUMN last_healthy_count INTEGER DEFAULT 0"
+                            )
+                        )
+                if "last_success_at" not in scraped_cols:
                     conn.execute(
                         db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN item_count INTEGER DEFAULT 0"
+                            "ALTER TABLE last_scraped ADD COLUMN last_success_at TIMESTAMP"
+                        )
+                    )
+                if "consecutive_unhealthy_obs" not in scraped_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
                         )
                     )
                 conn.commit()
@@ -139,10 +175,42 @@ class Database:
                     )
                 )
                 scraped_cols = [row[0] for row in result]
-                if "item_count" not in scraped_cols:
+                if "last_attempt_at" not in scraped_cols:
+                    if "timestamp" in scraped_cols:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped RENAME COLUMN timestamp TO last_attempt_at"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT NOW()"
+                            )
+                        )
+                if "last_healthy_count" not in scraped_cols:
+                    if "item_count" in scraped_cols:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped RENAME COLUMN item_count TO last_healthy_count"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            db.text(
+                                "ALTER TABLE last_scraped ADD COLUMN last_healthy_count INTEGER DEFAULT 0"
+                            )
+                        )
+                if "last_success_at" not in scraped_cols:
                     conn.execute(
                         db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN item_count INTEGER DEFAULT 0"
+                            "ALTER TABLE last_scraped ADD COLUMN last_success_at TIMESTAMP"
+                        )
+                    )
+                if "consecutive_unhealthy_obs" not in scraped_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
                         )
                     )
                 conn.commit()
@@ -207,25 +275,65 @@ class Database:
         except ValueError:
             raise ValueError(f"Could not extract price from: {currency_string}")
 
-    def update_or_insert_last_scraped(
+    def record_scrape_attempt(
         self, stockist: str, item_count: int | None = None
     ) -> None:
-        """Update or insert last scraped timestamp for a stockist."""
         with self.Session() as session:
             existing = session.query(LastScraped).filter_by(stockist=stockist).first()
             if existing is None:
                 session.add(
                     LastScraped(
                         stockist=stockist,
-                        timestamp=datetime.now(),
-                        item_count=item_count if item_count is not None else 0,
+                        last_attempt_at=datetime.now(),
+                        last_healthy_count=(
+                            item_count if item_count is not None else 0
+                        ),
                     )
                 )
             else:
-                existing.timestamp = datetime.now()
-                if item_count is not None:
-                    existing.item_count = item_count
+                existing.last_attempt_at = datetime.now()
             session.commit()
+
+    def record_healthy_scrape(self, stockist: str, item_count: int) -> None:
+        with self.Session() as session:
+            existing = session.query(LastScraped).filter_by(stockist=stockist).first()
+            if existing is None:
+                session.add(
+                    LastScraped(
+                        stockist=stockist,
+                        last_attempt_at=datetime.now(),
+                        last_success_at=datetime.now(),
+                        last_healthy_count=item_count,
+                        consecutive_unhealthy_obs=0,
+                    )
+                )
+            else:
+                existing.last_success_at = datetime.now()
+                existing.last_healthy_count = item_count
+                existing.consecutive_unhealthy_obs = 0
+            session.commit()
+
+    def record_unhealthy_scrape(self, stockist: str) -> int:
+        with self.Session() as session:
+            existing = session.query(LastScraped).filter_by(stockist=stockist).first()
+            if existing is None:
+                existing = LastScraped(
+                    stockist=stockist,
+                    last_attempt_at=datetime.now(),
+                    consecutive_unhealthy_obs=1,
+                )
+                session.add(existing)
+            else:
+                existing.consecutive_unhealthy_obs += 1
+            session.commit()
+            return existing.consecutive_unhealthy_obs
+
+    def get_consecutive_unhealthy_obs(self, stockist: str) -> int:
+        with self.Session() as session:
+            record = session.query(LastScraped).filter_by(stockist=stockist).first()
+            if record is None:
+                return 0
+            return record.consecutive_unhealthy_obs
 
     def record_scraping_failure(self, stockist: str) -> int:
         """Record a scraping failure and return consecutive failure count.
@@ -294,20 +402,12 @@ class Database:
                 return 0
             return failure.consecutive_failures
 
-    def get_last_item_count(self, stockist: str) -> int:
-        """Get the item count from the last successful scrape of a stockist.
-
-        Args:
-            stockist: Name of the stockist
-
-        Returns:
-            Number of items from the last successful scrape (0 if unknown)
-        """
+    def get_last_healthy_count(self, stockist: str) -> int:
         with self.Session() as session:
             record = session.query(LastScraped).filter_by(stockist=stockist).first()
             if record is None:
                 return 0
-            return record.item_count
+            return record.last_healthy_count
 
     def should_suppress_notification(self, url: str, website: str, stock: str) -> bool:
         """Check if a notification should be suppressed due to cooldown.

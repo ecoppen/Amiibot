@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.13"]
 
     steps:
     - name: Checkout code
@@ -26,7 +26,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
 
@@ -39,7 +39,7 @@ jobs:
         uv run pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         file: ./coverage.xml
         flags: unittests
@@ -59,10 +59,10 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: "3.13"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
 
@@ -73,17 +73,18 @@ jobs:
     - name: Run ruff (linting)
       run: |
         uv run ruff check .
-      continue-on-error: true
 
     - name: Run black (formatting check)
       run: |
         uv run black --check .
-      continue-on-error: true
+
+    - name: Run pyright (type checking)
+      run: |
+        uv run pyright
 
     - name: Run mypy (type checking)
       run: |
-        uv run mypy amiibot.py database.py scraper.py utils.py constants.py --ignore-missing-imports
-      continue-on-error: true
+        uv run mypy amiibot.py database.py scraper.py utils.py constants.py result.py --ignore-missing-imports
 
   security:
     name: Security Scanning
@@ -96,10 +97,10 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: "3.13"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
 
@@ -110,4 +111,3 @@ jobs:
     - name: Run bandit (security check)
       run: |
         uv run bandit -r . -ll -x ./tests,./site,./docs
-      continue-on-error: true

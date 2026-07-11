@@ -77,6 +77,10 @@ STOCKIST_HEALTH_RATIO = 0.5
 """If current scraped item count is less than this ratio of the previous count,
    the stockist is considered unhealthy and delisting is skipped for that run."""
 
+CONSECUTIVE_UNHEALTHY_THRESHOLD = 2
+"""Number of consecutive unhealthy observations (low ratio) required before
+   accepting a lowered item count as the new healthy baseline."""
+
 NOTIFICATION_COOLDOWN_MINUTES = 60
 """Minimum minutes between sending the same notification for an item with the same status."""
 
