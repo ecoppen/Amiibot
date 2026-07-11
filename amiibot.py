@@ -1,7 +1,5 @@
 import logging
 import os
-import signal
-import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
@@ -9,17 +7,15 @@ from config.config import load_config
 from constants import LOG_FILE_NAME, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 from database import Database
 from messenger.manager import MessageManager
+from result import FailureCategory, RunResult, RunStatus
 from scraper import Scraper
 from stockist.manager import StockistManager
 
-# Setup logging with rotation
 logs_file = Path(Path().resolve(), LOG_FILE_NAME)
 logs_file.touch(exist_ok=True)
 
-# Create logger
 log = logging.getLogger(__name__)
 
-# Setup rotating file handler
 rotating_handler = RotatingFileHandler(
     logs_file,
     maxBytes=LOG_MAX_BYTES,
@@ -32,7 +28,6 @@ rotating_handler.setFormatter(
     )
 )
 
-# Setup console handler
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(
     logging.Formatter(
@@ -48,51 +43,64 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
-# Global references for cleanup
 _database: Database | None = None
 _messengers: MessageManager | None = None
 
 
-def cleanup(signum: int | None = None, frame: object | None = None) -> None:
-    """Gracefully shutdown and cleanup resources.
-
-    Args:
-        signum: Signal number (for signal handlers)
-        frame: Stack frame (for signal handlers)
-    """
+def cleanup() -> None:
+    """Release resources without deciding the process exit code."""
     log.info("Shutting down gracefully...")
     if _database is not None:
         try:
-            log.info("Closing database connection...")
-            _database.Session().close()
+            log.info("Disposing database engine...")
+            _database.engine.dispose()
         except Exception as e:
-            log.warning(f"Error closing database: {e}")
+            log.warning(f"Error disposing database: {e}")
     log.info("Shutdown complete")
-    sys.exit(0)
 
 
-# Register signal handlers for graceful shutdown
-signal.signal(signal.SIGTERM, cleanup)
-signal.signal(signal.SIGINT, cleanup)
-
-try:
+def main() -> RunResult:
     config_path = Path("config", "config.json")
     config = load_config(path=config_path)
     log.info(f"{config_path} loaded")
 
+    global _database, _messengers
     _database = Database(config=config.database)
     _messengers = MessageManager(config=config.messengers)
     stockists = StockistManager(messengers=_messengers)
     scraper = Scraper(config=config, stockists=stockists, database=_database)
 
     log.info("Starting scraper...")
-    scraper.scrape()
-    log.info("Scraper completed successfully")
+    result = scraper.scrape()
+    log.info(f"Scraper completed: {result.status.name}")
+    return result
 
-except KeyboardInterrupt:
-    log.info("Interrupted by user")
-    cleanup()
-except Exception as e:
-    log.error(f"Fatal error: {e}", exc_info=True)
-    cleanup()
-    sys.exit(1)
+
+if __name__ == "__main__":
+    try:
+        result = main()
+    except KeyboardInterrupt:
+        log.info("Interrupted by user")
+        result = RunResult(
+            status=RunStatus.FAILURE,
+            exit_code=130,
+            failure_category=FailureCategory.UNEXPECTED,
+            errors=["Interrupted by user"],
+        )
+    except Exception as e:
+        log.error(f"Fatal error: {e}", exc_info=True)
+        result = RunResult(
+            status=RunStatus.FAILURE,
+            exit_code=1,
+            failure_category=FailureCategory.UNEXPECTED,
+            errors=[str(e)],
+        )
+    finally:
+        cleanup()
+        log.info(
+            f"Run result: status={result.status.name} "
+            f"exit_code={result.exit_code} "
+            f"stockists={result.stockists_succeeded}/{result.stockists_attempted} "
+            f"notifications={result.notifications_sent}"
+        )
+    raise SystemExit(result.exit_code)

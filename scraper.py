@@ -1,42 +1,54 @@
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import requests  # type: ignore
 
 from constants import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_FACTOR, STOCKIST_HEALTH_RATIO
+from result import FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
 
 
+@dataclass
+class CycleStats:
+    succeeded: int
+    failed: int
+    notifications_sent: int
+
+
 class Scraper:
     def __init__(self, config: Any, stockists: Any, database: Any) -> None:
-        """Initialize scraper with configuration, stockists, and database.
-
-        Args:
-            config: Configuration object
-            stockists: StockistManager instance
-            database: Database instance
-        """
         self.stockists = stockists
         self.messengers = stockists.messengers
         self.database = database
         self.config = config
 
-    def scrape(self) -> None:
-        """Execute scraping cycle with error handling and retry logic."""
+    def scrape(self) -> RunResult:
+        errors: list[str] = []
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             try:
                 log.info(
                     f"Starting scrape cycle (attempt {attempt}/{MAX_RETRY_ATTEMPTS})"
                 )
-                self.scrape_cycle()
+                cycle = self.scrape_cycle()
                 log.info("Scrape cycle completed successfully")
-                return
+                return RunResult(
+                    status=(
+                        RunStatus.SUCCESS if cycle.failed == 0 else RunStatus.PARTIAL
+                    ),
+                    exit_code=0 if cycle.failed == 0 else 2,
+                    stockists_attempted=cycle.succeeded + cycle.failed,
+                    stockists_succeeded=cycle.succeeded,
+                    stockists_failed=cycle.failed,
+                    notifications_sent=cycle.notifications_sent,
+                )
             except requests.exceptions.Timeout as e:
                 log.warning(
                     f"Request timed out on attempt {attempt}/{MAX_RETRY_ATTEMPTS}: {e}"
                 )
+                errors.append(str(e))
                 if attempt < MAX_RETRY_ATTEMPTS:
                     wait_time = RETRY_BACKOFF_FACTOR**attempt
                     log.info(f"Retrying in {wait_time} seconds...")
@@ -45,11 +57,13 @@ class Scraper:
                     log.error("Max retry attempts reached. Scrape cycle failed.")
             except requests.exceptions.TooManyRedirects as e:
                 log.error(f"Too many redirects: {e}. Not retrying.")
+                errors.append(str(e))
                 break
             except requests.exceptions.RequestException as e:
                 log.warning(
                     f"Request exception on attempt {attempt}/{MAX_RETRY_ATTEMPTS}: {e}"
                 )
+                errors.append(str(e))
                 if attempt < MAX_RETRY_ATTEMPTS:
                     wait_time = RETRY_BACKOFF_FACTOR**attempt
                     log.info(f"Retrying in {wait_time} seconds...")
@@ -58,10 +72,21 @@ class Scraper:
                     log.error("Max retry attempts reached. Scrape cycle failed.")
             except Exception as e:
                 log.error(f"Unexpected error during scrape cycle: {e}", exc_info=True)
+                errors.append(str(e))
                 break
 
-    def scrape_cycle(self) -> None:
-        """Execute a full scraping cycle across all configured stockists."""
+        return RunResult(
+            status=RunStatus.FAILURE,
+            exit_code=3,
+            failure_category=FailureCategory.NETWORK,
+            errors=errors,
+        )
+
+    def scrape_cycle(self) -> CycleStats:
+        succeeded = 0
+        failed = 0
+        notifications_sent = 0
+
         for stockist in self.stockists.all_stockists:
             log.info(f"Scraping {stockist.name}")
 
@@ -70,7 +95,6 @@ class Scraper:
             except Exception as e:
                 log.error(f"Error scraping {stockist.name}: {e}", exc_info=True)
 
-                # Record the scraping failure
                 failure_count = self.database.record_scraping_failure(stockist.name)
                 log.warning(
                     f"Scraping failed for {stockist.name}. "
@@ -78,18 +102,15 @@ class Scraper:
                     f"Consecutive failures: {failure_count}"
                 )
 
-                # Update last scraped time to track that we attempted
                 self.database.update_or_insert_last_scraped(stockist=stockist.name)
+                failed += 1
                 continue
 
             log.info(f"Scraped {len(scraped)} items from {stockist.name}")
 
-            # Check if scraping returned no items
             if len(scraped) == 0:
-                # Check how many consecutive failures we've had
                 failure_count = self.database.get_consecutive_failures(stockist.name)
 
-                # Record this as a potential failure
                 failure_count = self.database.record_scraping_failure(stockist.name)
 
                 log.warning(
@@ -98,14 +119,12 @@ class Scraper:
                     f"Skipping database update to prevent false 'delisted' notifications."
                 )
 
-                # Update last scraped time to track that we attempted
                 self.database.update_or_insert_last_scraped(stockist=stockist.name)
+                failed += 1
                 continue
 
-            # Successful scrape! Record it
             self.database.record_scraping_success(stockist.name)
 
-            # Validate scraped data before processing
             validated_items = []
             for item in scraped:
                 try:
@@ -120,9 +139,9 @@ class Scraper:
                 self.database.update_or_insert_last_scraped(
                     stockist=stockist.name, item_count=0
                 )
+                succeeded += 1
                 continue
 
-            # Stockist health check: skip delisting if item count is anomalously low
             current_count = len(validated_items)
             previous_count = self.database.get_last_item_count(stockist.name)
             skip_delisting = False
@@ -137,21 +156,19 @@ class Scraper:
                     )
                     skip_delisting = True
 
-            # Update last scraped timestamp with current item count
             self.database.update_or_insert_last_scraped(
                 stockist=stockist.name, item_count=current_count
             )
 
-            # Check and update database only if we have valid items
             to_notify = self.database.check_then_add_or_update_amiibo(
                 validated_items, skip_delisting=skip_delisting
             )
 
             if len(to_notify) == 0:
                 log.info(f"No changes detected for {stockist.name}")
+                succeeded += 1
                 continue
 
-            # Send notifications with cooldown suppression
             suppressed = 0
             for messenger in self.messengers.all_messengers:
                 if messenger.name in stockist.messengers:
@@ -168,8 +185,14 @@ class Scraper:
                         self.database.record_notification(
                             item["URL"], item["Website"], item["Stock"]
                         )
+                        notifications_sent += 1
             if suppressed:
                 log.info(
                     f"Suppressed {suppressed} notification(s) for {stockist.name} "
                     f"(cooldown)"
                 )
+            succeeded += 1
+
+        return CycleStats(
+            succeeded=succeeded, failed=failed, notifications_sent=notifications_sent
+        )

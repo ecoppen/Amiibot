@@ -4,26 +4,24 @@ version = "1.0.1"
 description = "Amiibo stock checker"
 requires-python = ">=3.13"
 dependencies = [
-    "beautifulsoup4>=4.14.3",
+    "beautifulsoup4>=4.15.0",
     "chromedriver-autoinstaller>=0.6.4",
-    "psycopg2-binary>=2.9.11",
-    "pydantic>=2.12.5",
-    "requests>=2.32.5",
+    "psycopg2-binary>=2.9.12",
+    "pydantic>=2.13.4",
+    "requests>=2.33.0",
     "selenium>=4.40.0",
     "sqlalchemy>=2.0.46",
 ]
 
 [dependency-groups]
 dev = [
-    "bandit>=1.9.3",
-    "black>=26.1.0",
+    "black>=26.3.1",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.5.0",
-    "mypy>=1.19.1",
-    "pre-commit>=4.5.1",
-    "pytest>=8.0.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
     "pytest-cov>=4.1.0",
-    "ruff>=0.15.1",
+    "ruff>=0.15.21",
     "types-requests>=2.32.0",
 ]
 
