@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, patch
 import requests
 from scraper import Scraper
-from result import RunResult, RunStatus, FailureCategory
+from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus, FailureCategory
 from scraper import CycleStats
 
 
@@ -25,6 +25,9 @@ class TestScraper:
         db._validate_amiibo_data.return_value = True
         db.check_then_add_or_update_amiibo.return_value = []
         db.should_suppress_notification.return_value = False
+        db.build_idempotency_key.return_value = "abc123"
+        db.was_delivered_to.return_value = False
+        db.record_delivery.return_value = None
         db.record_notification.return_value = None
         return db
 
@@ -40,7 +43,11 @@ class TestScraper:
     def mock_messenger(self):
         messenger = Mock()
         messenger.name = "test_messenger"
-        messenger.send_embed_message.return_value = None
+        messenger.send_embed_message.return_value = DeliveryResult(
+            status=DeliveryStatus.SUCCESS,
+            messenger_name="test_messenger",
+            http_status=200,
+        )
         return messenger
 
     @pytest.fixture

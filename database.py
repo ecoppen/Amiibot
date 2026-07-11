@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from constants import (
     NOTIFICATION_COOLDOWN_MINUTES,
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
+from result import DeliveryStatus
 from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
@@ -50,6 +52,21 @@ class NotificationOutbox(Base):
     title: Mapped[str]
     stock_status: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (UniqueConstraint("idempotency_key", "messenger_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    idempotency_key: Mapped[str]
+    website: Mapped[str]
+    url: Mapped[str]
+    title: Mapped[str]
+    stock_status: Mapped[str]
+    messenger_name: Mapped[str]
+    delivery_status: Mapped[str]
+    delivered_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
 
 class LastScraped(Base):
@@ -461,13 +478,6 @@ class Database:
         return False
 
     def record_notification(self, url: str, website: str, stock: str) -> None:
-        """Record that a notification was sent for an item.
-
-        Args:
-            url: Product URL
-            website: Website name
-            stock: Stock status that was notified
-        """
         with self.Session() as session:
             item = (
                 session.query(AmiiboStock).filter_by(URL=url, Website=website).first()
@@ -476,6 +486,57 @@ class Database:
                 item.last_notified_at = datetime.now()
                 item.last_notified_status = stock
                 session.commit()
+
+    def record_delivery(
+        self,
+        idempotency_key: str,
+        website: str,
+        url: str,
+        title: str,
+        stock_status: str,
+        messenger_name: str,
+        delivery_status: str,
+    ) -> None:
+        with self.Session() as session:
+            existing = (
+                session.query(NotificationDelivery)
+                .filter_by(
+                    idempotency_key=idempotency_key,
+                    messenger_name=messenger_name,
+                )
+                .first()
+            )
+            if existing is not None:
+                return
+            delivery = NotificationDelivery(
+                idempotency_key=idempotency_key,
+                website=website,
+                url=url,
+                title=title,
+                stock_status=stock_status,
+                messenger_name=messenger_name,
+                delivery_status=delivery_status,
+            )
+            session.add(delivery)
+            session.commit()
+
+    def was_delivered_to(self, idempotency_key: str, messenger_name: str) -> bool:
+        with self.Session() as session:
+            delivery = (
+                session.query(NotificationDelivery)
+                .filter_by(
+                    idempotency_key=idempotency_key,
+                    messenger_name=messenger_name,
+                    delivery_status=DeliveryStatus.SUCCESS.value,
+                )
+                .first()
+            )
+            return delivery is not None
+
+    @staticmethod
+    def build_idempotency_key(url: str, website: str, stock_status: str) -> str:
+        raw = f"{website}:{url}:{stock_status}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
     def _get_existing_items(self, website: str) -> list[AmiiboStock]:
         """Retrieve all existing items for a website."""

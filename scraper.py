@@ -11,7 +11,7 @@ from constants import (
     RETRY_BACKOFF_FACTOR,
     STOCKIST_HEALTH_RATIO,
 )
-from result import FailureCategory, RunResult, RunStatus
+from result import DeliveryStatus, FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
 
@@ -186,22 +186,40 @@ class Scraper:
                 continue
 
             suppressed = 0
-            for messenger in self.messengers.all_messengers:
-                if messenger.name in stockist.messengers:
-                    for item in to_notify:
-                        if self.database.should_suppress_notification(
-                            item["URL"], item["Website"], item["Stock"]
-                        ):
-                            log.info(
-                                f"Skipping notification for {item['Title']} (cooldown)"
-                            )
-                            suppressed += 1
-                            continue
-                        messenger.send_embed_message(item)
-                        self.database.record_notification(
-                            item["URL"], item["Website"], item["Stock"]
-                        )
+            for item in to_notify:
+                if self.database.should_suppress_notification(
+                    item["URL"], item["Website"], item["Stock"]
+                ):
+                    log.info(f"Skipping notification for {item['Title']} (cooldown)")
+                    suppressed += 1
+                    continue
+
+                idempotency_key = self.database.build_idempotency_key(
+                    item["URL"], item["Website"], item["Stock"]
+                )
+
+                for messenger in self.messengers.all_messengers:
+                    if messenger.name not in stockist.messengers:
+                        continue
+                    if self.database.was_delivered_to(idempotency_key, messenger.name):
+                        continue
+
+                    result = messenger.send_embed_message(item)
+                    self.database.record_delivery(
+                        idempotency_key=idempotency_key,
+                        website=item["Website"],
+                        url=item["URL"],
+                        title=item["Title"],
+                        stock_status=item["Stock"],
+                        messenger_name=messenger.name,
+                        delivery_status=result.status.value,
+                    )
+                    if result.status == DeliveryStatus.SUCCESS:
                         notifications_sent += 1
+
+                self.database.record_notification(
+                    item["URL"], item["Website"], item["Stock"]
+                )
             if suppressed:
                 log.info(
                     f"Suppressed {suppressed} notification(s) for {stockist.name} "

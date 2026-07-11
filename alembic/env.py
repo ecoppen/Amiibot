@@ -12,6 +12,7 @@ from database import (  # noqa: F401
     AmiiboStock,
     Base,
     LastScraped,
+    NotificationDelivery,
     NotificationOutbox,
     ScrapingFailure,
 )

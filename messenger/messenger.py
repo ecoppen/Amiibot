@@ -1,103 +1,99 @@
 import logging
-from typing import Any, Optional, Union
+from typing import Any
 
 import requests  # type: ignore
 
 from constants import REQUEST_TIMEOUT
+from result import DeliveryResult, DeliveryStatus
 
 log = logging.getLogger(__name__)
 
 
-class BlankResponse:
-    """Mock response object for failed requests."""
-
-    def __init__(self) -> None:
-        self.content = ""
-
-
 class Messenger:
-    """Base messenger class for sending notifications."""
-
     def __init__(self, name: str, stockists: list[str], active: bool) -> None:
-        """Initialize messenger.
-
-        Args:
-            name: Name identifier for the messenger
-            stockists: List of stockist URLs this messenger tracks
-            active: Whether this messenger is active
-        """
         self.name = name
         self.stockists = stockists
         self.active = active
-        self.empty_response = BlankResponse()
 
-    messenger: Optional[str] = None
+    messenger: str | None = None
+
+    def _classify_response(self, response: requests.Response) -> DeliveryStatus:
+        code = response.status_code
+        if 200 <= code < 300:
+            return DeliveryStatus.SUCCESS
+        if code == 429 or code >= 500:
+            return DeliveryStatus.TRANSIENT_FAILURE
+        return DeliveryStatus.PERMANENT_FAILURE
+
+    def _build_delivery_result(
+        self,
+        status: DeliveryStatus,
+        http_status: int | None = None,
+        diagnostic: str | None = None,
+    ) -> DeliveryResult:
+        return DeliveryResult(
+            status=status,
+            messenger_name=self.name,
+            http_status=http_status,
+            diagnostic=diagnostic,
+        )
 
     def send_post(
         self,
         url: str,
-        json: Optional[dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
         timeout: int = REQUEST_TIMEOUT,
-    ) -> Union[requests.Response, BlankResponse]:
-        """Send a POST request with error handling.
-
-        Args:
-            url: URL to POST to
-            json: JSON data to send
-            timeout: Request timeout in seconds
-
-        Returns:
-            Response object or BlankResponse on error
-        """
+    ) -> DeliveryResult:
         try:
             response = requests.post(url, json=json, timeout=timeout)
-            return response
+            status = self._classify_response(response)
+            return self._build_delivery_result(status, response.status_code)
         except requests.exceptions.Timeout:
-            log.info("Request timed out")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic="timeout"
+            )
+        except requests.exceptions.ConnectionError as e:
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic=f"connection: {e}"
+            )
         except requests.exceptions.TooManyRedirects:
-            log.warning("Too many redirects")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.PERMANENT_FAILURE, diagnostic="too many redirects"
+            )
         except requests.exceptions.RequestException as e:
-            log.warning(f"Request exception: {e}")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic=str(e)
+            )
 
     def send_get(
         self,
         url: str,
-        params: Optional[dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         timeout: int = REQUEST_TIMEOUT,
-    ) -> Union[requests.Response, BlankResponse]:
-        """Send a GET request with error handling.
-
-        Args:
-            url: URL to GET from
-            params: Query parameters
-            timeout: Request timeout in seconds
-
-        Returns:
-            Response object or BlankResponse on error
-        """
+    ) -> DeliveryResult:
         try:
             response = requests.get(url, params=params, timeout=timeout)
-            return response
+            status = self._classify_response(response)
+            return self._build_delivery_result(status, response.status_code)
         except requests.exceptions.Timeout:
-            log.info("Request timed out")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic="timeout"
+            )
+        except requests.exceptions.ConnectionError as e:
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic=f"connection: {e}"
+            )
         except requests.exceptions.TooManyRedirects:
-            log.warning("Too many redirects")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.PERMANENT_FAILURE, diagnostic="too many redirects"
+            )
         except requests.exceptions.RequestException as e:
-            log.warning(f"Request exception: {e}")
-            return self.empty_response
+            return self._build_delivery_result(
+                DeliveryStatus.TRANSIENT_FAILURE, diagnostic=str(e)
+            )
 
-    def send_message(self, message):
-        log.info(f"Sending message: {message}")
-        pass
+    def send_message(self, message: str) -> DeliveryResult:
+        return self._build_delivery_result(DeliveryStatus.INACTIVE)
 
-    def send_embed_message(self, embed_data):
-        log.info(f"Sending message: {embed_data}")
-        pass
-
-    def format_embed_data(self, data):
-        pass
+    def send_embed_message(self, embed_data: dict[str, Any]) -> DeliveryResult:
+        return self._build_delivery_result(DeliveryStatus.INACTIVE)

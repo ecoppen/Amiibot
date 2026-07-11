@@ -16,6 +16,13 @@ class FailureCategory(Enum):
     UNEXPECTED = "unexpected"
 
 
+class DeliveryStatus(Enum):
+    SUCCESS = "success"
+    TRANSIENT_FAILURE = "transient_failure"
+    PERMANENT_FAILURE = "permanent_failure"
+    INACTIVE = "inactive"
+
+
 @dataclass
 class RunResult:
     status: RunStatus
@@ -26,3 +33,11 @@ class RunResult:
     notifications_sent: int = 0
     failure_category: FailureCategory | None = None
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DeliveryResult:
+    status: DeliveryStatus
+    messenger_name: str
+    http_status: int | None = None
+    diagnostic: str | None = None
