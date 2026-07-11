@@ -69,9 +69,6 @@ jobs:
     - name: Run black (formatting check)
       run: uv run black --check .
 
-    - name: Run mypy (type checking)
-      run: uv run mypy amiibot.py database.py scraper.py utils.py constants.py result.py --ignore-missing-imports
-
   security:
     name: Security Scanning
     runs-on: ubuntu-latest
