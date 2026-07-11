@@ -1,9 +1,7 @@
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
-
-import requests  # type: ignore
 
 from constants import (
     CONSECUTIVE_UNHEALTHY_THRESHOLD,
@@ -11,9 +9,20 @@ from constants import (
     RETRY_BACKOFF_FACTOR,
     STOCKIST_HEALTH_RATIO,
 )
+from models import deduplicate_by_url, validate_products
 from result import DeliveryStatus, FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class StockistResult:
+    name: str
+    success: bool
+    item_count: int = 0
+    duration_seconds: float = 0
+    consecutive_failures: int = 0
+    error: str | None = None
 
 
 @dataclass
@@ -21,6 +30,7 @@ class CycleStats:
     succeeded: int
     failed: int
     notifications_sent: int
+    stockist_results: list[StockistResult] = field(default_factory=list)
 
 
 class Scraper:
@@ -31,83 +41,81 @@ class Scraper:
         self.config = config
 
     def scrape(self) -> RunResult:
-        errors: list[str] = []
+        try:
+            cycle = self.scrape_cycle()
+            errors: list[str] = []
+            for sr in cycle.stockist_results:
+                if not sr.success and sr.error:
+                    errors.append(f"{sr.name}: {sr.error}")
+                log.info(
+                    f"  {sr.name}: {'OK' if sr.success else 'FAIL'} "
+                    f"items={sr.item_count} "
+                    f"{sr.duration_seconds}s "
+                    f"failures={sr.consecutive_failures}"
+                )
+            return RunResult(
+                status=(RunStatus.SUCCESS if cycle.failed == 0 else RunStatus.PARTIAL),
+                exit_code=0 if cycle.failed == 0 else 2,
+                stockists_attempted=cycle.succeeded + cycle.failed,
+                stockists_succeeded=cycle.succeeded,
+                stockists_failed=cycle.failed,
+                notifications_sent=cycle.notifications_sent,
+                errors=errors,
+            )
+        except Exception as e:
+            log.error(f"Scrape cycle failed: {e}", exc_info=True)
+            return RunResult(
+                status=RunStatus.FAILURE,
+                exit_code=3,
+                failure_category=FailureCategory.UNEXPECTED,
+                errors=[str(e)],
+            )
+
+    def _scrape_stockist(self, stockist: Any) -> list[dict[str, Any]]:
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             try:
-                log.info(
-                    f"Starting scrape cycle (attempt {attempt}/{MAX_RETRY_ATTEMPTS})"
-                )
-                cycle = self.scrape_cycle()
-                log.info("Scrape cycle completed successfully")
-                return RunResult(
-                    status=(
-                        RunStatus.SUCCESS if cycle.failed == 0 else RunStatus.PARTIAL
-                    ),
-                    exit_code=0 if cycle.failed == 0 else 2,
-                    stockists_attempted=cycle.succeeded + cycle.failed,
-                    stockists_succeeded=cycle.succeeded,
-                    stockists_failed=cycle.failed,
-                    notifications_sent=cycle.notifications_sent,
-                )
-            except requests.exceptions.Timeout as e:
-                log.warning(
-                    f"Request timed out on attempt {attempt}/{MAX_RETRY_ATTEMPTS}: {e}"
-                )
-                errors.append(str(e))
-                if attempt < MAX_RETRY_ATTEMPTS:
-                    wait_time = RETRY_BACKOFF_FACTOR**attempt
-                    log.info(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    log.error("Max retry attempts reached. Scrape cycle failed.")
-            except requests.exceptions.TooManyRedirects as e:
-                log.error(f"Too many redirects: {e}. Not retrying.")
-                errors.append(str(e))
-                break
-            except requests.exceptions.RequestException as e:
-                log.warning(
-                    f"Request exception on attempt {attempt}/{MAX_RETRY_ATTEMPTS}: {e}"
-                )
-                errors.append(str(e))
-                if attempt < MAX_RETRY_ATTEMPTS:
-                    wait_time = RETRY_BACKOFF_FACTOR**attempt
-                    log.info(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    log.error("Max retry attempts reached. Scrape cycle failed.")
+                return stockist.get_amiibo()
             except Exception as e:
-                log.error(f"Unexpected error during scrape cycle: {e}", exc_info=True)
-                errors.append(str(e))
-                break
-
-        return RunResult(
-            status=RunStatus.FAILURE,
-            exit_code=3,
-            failure_category=FailureCategory.NETWORK,
-            errors=errors,
-        )
+                log.warning(
+                    f"Error scraping {stockist.name} "
+                    f"(attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {e}"
+                )
+                if attempt < MAX_RETRY_ATTEMPTS:
+                    wait_time = RETRY_BACKOFF_FACTOR**attempt
+                    log.info(f"Retrying {stockist.name} in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+        raise RuntimeError("unreachable")
 
     def scrape_cycle(self) -> CycleStats:
         succeeded = 0
         failed = 0
         notifications_sent = 0
+        stockist_results: list[StockistResult] = []
 
         for stockist in self.stockists.all_stockists:
             log.info(f"Scraping {stockist.name}")
+            start_time = time.monotonic()
 
             try:
-                scraped = stockist.get_amiibo()
+                scraped = self._scrape_stockist(stockist)
             except Exception as e:
                 log.error(f"Error scraping {stockist.name}: {e}", exc_info=True)
+                elapsed = time.monotonic() - start_time
 
                 failure_count = self.database.record_scraping_failure(stockist.name)
-                log.warning(
-                    f"Scraping failed for {stockist.name}. "
-                    f"Skipping database update to prevent false notifications. "
-                    f"Consecutive failures: {failure_count}"
-                )
-
                 self.database.record_scrape_attempt(stockist=stockist.name)
+
+                stockist_results.append(
+                    StockistResult(
+                        name=stockist.name,
+                        success=False,
+                        duration_seconds=round(elapsed, 2),
+                        consecutive_failures=failure_count,
+                        error=str(e),
+                    )
+                )
                 failed += 1
                 continue
 
@@ -127,13 +135,11 @@ class Scraper:
                 failed += 1
                 continue
 
-            validated_items = []
-            for item in scraped:
-                try:
-                    self.database._validate_amiibo_data(item)
-                    validated_items.append(item)
-                except ValueError as e:
-                    log.error(f"Invalid data from {stockist.name}: {e}")
+            validated_items, validation_errors = validate_products(scraped)
+            for error in validation_errors:
+                log.error(f"Invalid data from {stockist.name}: {error}")
+
+            validated_items = deduplicate_by_url(validated_items)
 
             if not validated_items:
                 log.warning(f"No valid items from {stockist.name} after validation")
@@ -182,6 +188,15 @@ class Scraper:
 
             if len(to_notify) == 0:
                 log.info(f"No changes detected for {stockist.name}")
+                elapsed = time.monotonic() - start_time
+                stockist_results.append(
+                    StockistResult(
+                        name=stockist.name,
+                        success=True,
+                        item_count=current_count,
+                        duration_seconds=round(elapsed, 2),
+                    )
+                )
                 succeeded += 1
                 continue
 
@@ -225,8 +240,20 @@ class Scraper:
                     f"Suppressed {suppressed} notification(s) for {stockist.name} "
                     f"(cooldown)"
                 )
+            elapsed = time.monotonic() - start_time
+            stockist_results.append(
+                StockistResult(
+                    name=stockist.name,
+                    success=True,
+                    item_count=current_count,
+                    duration_seconds=round(elapsed, 2),
+                )
+            )
             succeeded += 1
 
         return CycleStats(
-            succeeded=succeeded, failed=failed, notifications_sent=notifications_sent
+            succeeded=succeeded,
+            failed=failed,
+            notifications_sent=notifications_sent,
+            stockist_results=stockist_results,
         )

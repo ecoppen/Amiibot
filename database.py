@@ -8,7 +8,7 @@ import sqlalchemy as db
 from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from config.config import Database as Database_
+from config.config import DatabaseConfig as Database_
 from constants import (
     DB_MAX_OVERFLOW,
     DB_POOL_SIZE,
@@ -41,6 +41,9 @@ class AmiiboStock(Base):
     missed_count: Mapped[int] = mapped_column(default=0)
     last_notified_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_notified_status: Mapped[str | None] = mapped_column(nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    delisted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    first_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class NotificationOutbox(Base):
@@ -147,6 +150,24 @@ class Database:
                             "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
                         )
                     )
+                if "is_active" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN is_active BOOLEAN DEFAULT 1"
+                        )
+                    )
+                if "delisted_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN delisted_at TIMESTAMP"
+                        )
+                    )
+                if "first_seen_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN first_seen_at TIMESTAMP"
+                        )
+                    )
                 result = conn.execute(db.text("PRAGMA table_info(last_scraped)"))
                 scraped_cols = [row[1] for row in result]
                 if "last_attempt_at" not in scraped_cols:
@@ -212,6 +233,24 @@ class Database:
                     conn.execute(
                         db.text(
                             "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
+                        )
+                    )
+                if "is_active" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN is_active BOOLEAN DEFAULT true"
+                        )
+                    )
+                if "delisted_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN delisted_at TIMESTAMP"
+                        )
+                    )
+                if "first_seen_at" not in amiibo_cols:
+                    conn.execute(
+                        db.text(
+                            "ALTER TABLE amiibo_stock ADD COLUMN first_seen_at TIMESTAMP"
                         )
                     )
                 result = conn.execute(
@@ -560,7 +599,8 @@ class Database:
 
     def _handle_delisted_item(self, session: Any, item: AmiiboStock) -> dict[str, Any]:
         log.info(f"{item.Title} is no longer listed")
-        session.delete(item)
+        item.is_active = False
+        item.delisted_at = datetime.now()
         return {
             "Colour": 0xFF0000,
             "Title": item.Title,
@@ -586,6 +626,8 @@ class Database:
                 URL=datum["URL"],
                 Image=datum["Image"],
                 timestamp=datetime.now(),
+                is_active=True,
+                first_seen_at=datetime.now(),
             )
             session.add(amiibo)
             added.append(datum)
@@ -624,6 +666,10 @@ class Database:
                     if item.URL in new_data_map:
                         new_datum = new_data_map[item.URL]
                         item.missed_count = 0
+                        if not item.is_active:
+                            log.info(f"{item.Title} has returned to stock")
+                            item.is_active = True
+                            item.delisted_at = None
                         if self.remove_currency(
                             new_datum["Price"]
                         ) != self.remove_currency(item.Price):

@@ -226,7 +226,7 @@ class TestTelegram:
             name="test_telegram",
             stockists=["test.com"],
             active=True,
-            bot_token="123456:ABC-DEF",
+            bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
             chat_id="123456789",
         )
 
@@ -234,7 +234,10 @@ class TestTelegram:
         assert telegram_messenger.name == "test_telegram"
         assert telegram_messenger.stockists == ["test.com"]
         assert telegram_messenger.active is True
-        assert telegram_messenger.bot_token == "123456:ABC-DEF"
+        assert (
+            telegram_messenger.bot_token
+            == "1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs"
+        )
         assert telegram_messenger.data["chat_id"] == "123456789"
 
     @patch("messenger.telegram.Telegram.send_get")
@@ -255,7 +258,7 @@ class TestTelegram:
             name="test_telegram",
             stockists=["test.com"],
             active=False,
-            bot_token="123456:ABC-DEF",
+            bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
             chat_id="123456789",
         )
 
@@ -284,7 +287,7 @@ class TestMessageManager:
             "test_telegram": Mock(
                 messenger_type="telegram",
                 stockists=["test.com"],
-                bot_token="123456:ABC-DEF",
+                bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
                 chat_id="123456789",
                 active=True,
             )
@@ -304,7 +307,7 @@ class TestMessageManager:
             "test_telegram": Mock(
                 messenger_type="telegram",
                 stockists=["example.com"],
-                bot_token="123456:ABC-DEF",
+                bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
                 chat_id="123456789",
                 active=True,
             ),
@@ -342,7 +345,7 @@ class TestMessageManager:
             "test_telegram": Mock(
                 messenger_type="telegram",
                 stockists=["example.com"],
-                bot_token="123456:ABC-DEF",
+                bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
                 chat_id="123456789",
                 active=True,
             ),

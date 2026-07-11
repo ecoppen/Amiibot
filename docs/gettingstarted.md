@@ -1,8 +1,8 @@
 # Getting Started
 
-Amiibot is a production-ready web scraper and stock notifier for Amiibo. Track multiple retailers and get notified instantly when stock changes occur (`In stock`, `Out of stock`, `Price change`).
+Amiibot monitors retailers for Amiibo stock changes and sends notifications via Discord or Telegram.
 
-## 🎯 Quick Start
+## Quick Start
 
 ```bash
 # Clone the repository
@@ -22,9 +22,9 @@ python amiibot.py
 
 ---
 
-## 📋 Requirements
+## Requirements
 
-### Hardware Requirements
+### Hardware
 
 **Minimum:**
 - 512MB RAM
@@ -47,9 +47,9 @@ python amiibot.py
 ### Software Requirements
 
 **Required:**
-- Python 3.12 or higher
+- Python 3.13 or higher
 - uv (package manager)
-- Chrome/Chromium (for Selenium)
+- Chromium (for Selenium)
 
 **Optional:**
 - PostgreSQL (for production)
@@ -58,7 +58,7 @@ python amiibot.py
 
 ---
 
-## 📦 Installation
+##  Installation
 
 ### Method 1: Using uv (Recommended)
 
@@ -115,7 +115,7 @@ pre-commit install
 
 ---
 
-## ⚙️ Configuration
+##  Configuration
 
 ### Step 1: Create Configuration File
 
@@ -152,7 +152,7 @@ Minimal configuration example:
 }
 ```
 
-!!! tip "Configuration Validation"
+!!! note "Configuration Validation"
     Amiibot validates your configuration at startup and will show clear error messages if something is wrong.
 
 ### Step 3: Database Setup
@@ -250,7 +250,7 @@ Minimal configuration example:
 
 ---
 
-## 🚀 Running the Bot
+##  Running the Bot
 
 ### Manual Execution
 
@@ -288,7 +288,7 @@ crontab -e
 */30 * * * * cd /path/to/Amiibot && /path/to/Amiibot/.venv/bin/python amiibot.py >> /path/to/Amiibot/cron.log 2>&1
 ```
 
-!!! tip "Finding Python Path"
+!!! note "Finding Python Path"
     ```bash
     cd /path/to/Amiibot
     source .venv/bin/activate
@@ -309,7 +309,7 @@ chmod +x amiibot_runner.sh
 
 ---
 
-## 🔍 Verification
+##  Verification
 
 ### Check Logs
 

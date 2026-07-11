@@ -4,7 +4,7 @@ Comprehensive guide for running tests in Amiibot.
 
 ---
 
-## 📋 Overview
+##  Overview
 
 Amiibot uses **pytest** for unit testing with coverage reporting. Tests run automatically on every push to GitHub via GitHub Actions.
 
@@ -18,7 +18,7 @@ Amiibot uses **pytest** for unit testing with coverage reporting. Tests run auto
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ```bash
 # Install dependencies
@@ -72,7 +72,7 @@ Test interactions between components:
 
 ---
 
-## ⚙️ Running Tests
+##  Running Tests
 
 ### Run All Tests
 
@@ -131,7 +131,7 @@ uv run pytest --lf
 
 ---
 
-## 📊 Coverage Reports
+##  Coverage Reports
 
 ### Generate Coverage Report
 
@@ -165,7 +165,7 @@ Coverage settings are in `pytest.ini`:
 
 ---
 
-## 🎯 Writing Tests
+##  Writing Tests
 
 ### Test Structure
 
@@ -322,7 +322,7 @@ def test_config_validation_empty_stockists(self):
 
 ---
 
-## 🎯 Test Coverage Goals
+##  Test Coverage Goals
 
 | Component | Current | Goal |
 |-----------|---------|------|

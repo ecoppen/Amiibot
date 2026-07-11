@@ -93,47 +93,42 @@ class TestUserAgent:
 
 
 class TestStockistUtils:
-    """Test stockist utility functions."""
-
-    @patch("stockist.utils.dispatch_request")
-    def test_send_public_request_success(self, mock_dispatch):
-        """Test successful public request."""
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_success(self, mock_session_fn):
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.content = b"Success"
-
-        mock_get = Mock(return_value=mock_response)
-        mock_dispatch.return_value = mock_get
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+        mock_session_fn.return_value = mock_session
 
         result = send_public_request(url="https://test.com", payload={"key": "value"})
 
         assert result == mock_response
-        mock_dispatch.assert_called_once_with("GET")
+        mock_session.get.assert_called_once()
 
-    @patch("stockist.utils.dispatch_request")
-    def test_send_public_request_timeout(self, mock_dispatch):
-        """Test request timeout handling."""
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_timeout(self, mock_session_fn):
         from stockist.utils import BlankResponse
 
-        mock_get = Mock(side_effect=requests.exceptions.Timeout)
-        mock_dispatch.return_value = mock_get
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.Timeout
+        mock_session_fn.return_value = mock_session
 
         result = send_public_request(url="https://test.com", payload=None)
 
-        # Should return BlankResponse
         assert isinstance(result, BlankResponse)
 
-    @patch("stockist.utils.dispatch_request")
-    def test_send_public_request_connection_error(self, mock_dispatch):
-        """Test connection error handling."""
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_connection_error(self, mock_session_fn):
         from stockist.utils import BlankResponse
 
-        mock_get = Mock(side_effect=requests.exceptions.ConnectionError)
-        mock_dispatch.return_value = mock_get
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.ConnectionError
+        mock_session_fn.return_value = mock_session
 
         result = send_public_request(url="https://test.com", payload=None)
 
-        # Should return BlankResponse
         assert isinstance(result, BlankResponse)
 
 

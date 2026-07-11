@@ -4,33 +4,25 @@ from urllib.parse import urlencode
 
 import requests  # type: ignore
 
-from stockist.useragents import UserAgent
+from constants import FALLBACK_USER_AGENTS, REQUEST_TIMEOUT
 
 log = logging.getLogger(__name__)
 
-user_agents = UserAgent()
-user_agent_list = user_agents.get_user_agents()
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update({"Content-Type": "charset=utf-8"})
+    _session.headers.update({"User-Agent": secrets.choice(FALLBACK_USER_AGENTS)})
+    return _session
 
 
 class BlankResponse:
     def __init__(self):
         self.content = ""
-
-
-def dispatch_request(http_method):
-    session = requests.Session()
-    session.headers.update(
-        {
-            "Content-Type": "charset=utf-8",
-            "User-Agent": str(secrets.choice(user_agent_list)),
-        }
-    )
-    return {
-        "GET": session.get,
-        "DELETE": session.delete,
-        "PUT": session.put,
-        "POST": session.post,
-    }.get(http_method, "GET")
 
 
 def send_public_request(url, payload=None):
@@ -41,12 +33,18 @@ def send_public_request(url, payload=None):
     if query_string:
         url = url + "?" + query_string
 
-    log.info(f"Requesting {url}")
-
     try:
-        response = dispatch_request("GET")(url=url, timeout=10)
+        response = _get_session().get(url=url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response
     except requests.exceptions.Timeout:
         log.info("Request timed out")
+        return empty_response
+    except requests.exceptions.ConnectionError as e:
+        log.warning(f"Connection error: {e}")
+        return empty_response
+    except requests.exceptions.HTTPError as e:
+        log.warning(f"HTTP error: {e}")
         return empty_response
     except requests.exceptions.TooManyRedirects:
         log.warning("Too many redirects")
@@ -54,5 +52,3 @@ def send_public_request(url, payload=None):
     except requests.exceptions.RequestException as e:
         log.warning(f"Request exception: {e}")
         return empty_response
-
-    return response

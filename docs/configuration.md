@@ -132,7 +132,7 @@ You can configure multiple messengers with different stockist lists. Each messen
 5. Give it a name and avatar (optional)
 6. Copy the webhook URL
 
-!!! tip "Multiple Discord Webhooks"
+!!! note "Multiple Discord Webhooks"
     You can create multiple webhooks for different channels:
 
     ```json

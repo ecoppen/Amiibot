@@ -54,7 +54,7 @@ class TestConfiguration:
             "messengers": {
                 "test_telegram": {
                     "messenger_type": "telegram",
-                    "bot_token": "123456:ABC-DEF",
+                    "bot_token": "1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
                     "chat_id": "123456789",
                     "active": True,
                     "embedded_messages": True,
@@ -225,7 +225,7 @@ class TestConfiguration:
                 },
                 "telegram1": {
                     "messenger_type": "telegram",
-                    "bot_token": "123456:ABC-DEF",
+                    "bot_token": "1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
                     "chat_id": "123456789",
                     "active": True,
                     "embedded_messages": True,

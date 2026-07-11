@@ -1,33 +1,25 @@
 import logging
 import secrets
-import time
-import urllib.error
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
-import chromedriver_autoinstaller
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
 
-from constants import SELENIUM_WAIT_TIME, FALLBACK_USER_AGENTS
-from stockist.useragents import UserAgent
+from constants import (
+    FALLBACK_USER_AGENTS,
+    SELENIUM_WAIT_MAX,
+)
 from stockist.utils import send_public_request
 
 log = logging.getLogger(__name__)
 
-user_agents = UserAgent()
-user_agent_list = user_agents.get_user_agents()
-
-# Validate user agent list is not empty
-if not user_agent_list:
-    log.error("User agent list is empty! Using fallback agents.")
-    user_agent_list = FALLBACK_USER_AGENTS
+USER_AGENTS: list[str] = FALLBACK_USER_AGENTS
 
 
 class Stock(Enum):
-    """Stock status enumeration."""
-
     DELISTED = "Delisted"
     IN_STOCK = "In stock"
     OUT_OF_STOCK = "Out of Stock"
@@ -35,68 +27,41 @@ class Stock(Enum):
 
 
 class Stockist:
-    """Base class for all stockist scrapers."""
-
     def __init__(self, messengers: list[str]) -> None:
-        """Initialize stockist.
-
-        Args:
-            messengers: List of messenger names to notify
-        """
         self.params: dict[str, Any] = {}
         self.messengers = messengers
 
-    base_url: Optional[str] = None
-    name: Optional[str] = None
+    base_url: str | None = None
+    name: str | None = None
 
-    def scrape(self, url: str, payload: Optional[dict[str, Any]]) -> Any:
-        """Scrape a URL using requests library.
-
-        Args:
-            url: URL to scrape
-            payload: Query parameters
-
-        Returns:
-            Response object
-        """
+    def scrape(self, url: str, payload: dict[str, Any] | None) -> Any:
         return send_public_request(url=url, payload=payload)
 
-    def scrape_with_selenium(self, url: str, payload: Optional[dict[str, Any]]) -> str:
-        """Scrape a URL using Selenium WebDriver.
-
-        Args:
-            url: URL to scrape
-            payload: Query parameters (unused for Selenium)
-
-        Returns:
-            HTML page source as string
-        """
-        try:
-            chromedriver_autoinstaller.install()
-        except urllib.error.URLError as e:
-            log.error(f"Error with chromedriver auto-installation - {e}")
-            return ""
-
+    def scrape_with_selenium(self, url: str, payload: dict[str, Any] | None) -> str:
         driver = None
         try:
             options = Options()
-            options.headless = True
-            options.add_argument("--headless")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--window-size=1920,1080")
             options.add_experimental_option("excludeSwitches", ["enable-logging"])
-            options.add_experimental_option("useAutomationExtension", False)
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("--no-sandbox")
-            options.add_argument(f"user-agent={secrets.choice(user_agent_list)}")
+            options.add_argument(f"user-agent={secrets.choice(USER_AGENTS)}")
 
             driver = webdriver.Chrome(options=options)
-            driver.get(url)
-            time.sleep(SELENIUM_WAIT_TIME)  # Allow time for JS to render
-            html = driver.page_source
-            return html
+            driver.set_page_load_timeout(SELENIUM_WAIT_MAX)
+            driver.set_script_timeout(SELENIUM_WAIT_MAX)
 
+            driver.get(url)
+            WebDriverWait(driver, SELENIUM_WAIT_MAX).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            return driver.page_source
+
+        except TimeoutException as e:
+            log.error(f"Selenium timeout for {url[:100]}: {e}")
+            return ""
         except WebDriverException as e:
-            log.error(f"Selenium exception: {e.msg}")
+            log.error(f"WebDriver exception: {e.msg}")
             return ""
         finally:
             if driver is not None:
@@ -106,9 +71,4 @@ class Stockist:
                     log.warning(f"Error closing Selenium driver: {e}")
 
     def get_amiibo(self) -> list[dict[str, Any]]:
-        """Get list of amiibo from this stockist.
-
-        Returns:
-            List of amiibo data dictionaries
-        """
         raise NotImplementedError("Subclasses must implement get_amiibo()")

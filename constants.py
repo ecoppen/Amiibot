@@ -15,7 +15,10 @@ SELENIUM_WAIT_TIME = 5
 """Time to wait for JavaScript rendering in Selenium."""
 
 SELENIUM_WAIT_MAX = 20
-"""Maximum wait time for Selenium WebDriver operations."""
+"""Maximum wait time for Selenium WebDriver operations (page load, script, element wait)."""
+
+SELENIUM_STOCKIST_DEADLINE = 60
+"""Per-stockist total deadline in seconds for Selenium-based scrapes."""
 
 # ============================================================================
 # LOGGING SETTINGS

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-from config.config import load_config
+from config.config import load_config, redact_secrets
 from constants import LOG_FILE_NAME, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 from database import Database
 from messenger.manager import MessageManager
@@ -42,6 +42,21 @@ logging.basicConfig(
     level=os.environ.get("LOGLEVEL", "INFO"),
     handlers=[rotating_handler, console_handler],
 )
+
+
+class SecretRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = redact_secrets(record.msg)
+        if record.args and isinstance(record.args, tuple):
+            record.args = tuple(
+                redact_secrets(str(a)) if isinstance(a, str) else a for a in record.args
+            )
+        return True
+
+
+for handler in logging.getLogger().handlers:
+    handler.addFilter(SecretRedactionFilter())
 
 log = logging.getLogger(__name__)
 
@@ -128,9 +143,12 @@ if __name__ == "__main__":
     finally:
         cleanup()
         log.info(
-            f"Run result: status={result.status.name} "
-            f"exit_code={result.exit_code} "
+            f"Run summary: status={result.status.name} "
+            f"exit={result.exit_code} "
             f"stockists={result.stockists_succeeded}/{result.stockists_attempted} "
             f"notifications={result.notifications_sent}"
         )
+        if result.errors:
+            for err in result.errors[:5]:
+                log.info(f"  error: {err}")
     raise SystemExit(result.exit_code)

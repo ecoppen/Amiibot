@@ -5,7 +5,7 @@ Unit tests for database module.
 import pytest
 from datetime import datetime, timedelta
 from database import Database, LastScraped, AmiiboStock, ScrapingFailure
-from config.config import Database as DatabaseConfig
+from config.config import DatabaseConfig
 
 
 class TestDatabase:

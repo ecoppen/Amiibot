@@ -156,7 +156,7 @@ class TestUtilityFunctions:
     def test_health_check_database(self):
         from utils import HealthCheck
         from database import Database
-        from config.config import Database as DatabaseConfig
+        from config.config import DatabaseConfig
 
         config = DatabaseConfig(engine="sqlite", name="test_health")
         db = Database(config)

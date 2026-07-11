@@ -1,8 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
-import requests
 from scraper import Scraper
-from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus, FailureCategory
+from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus
 from scraper import CycleStats
 
 
@@ -101,49 +100,70 @@ class TestScraper:
         assert result.stockists_failed == 1
 
     @patch("time.sleep")
-    def test_scrape_timeout_with_retry_returns_result(self, mock_sleep, scraper):
-        scraper.scrape_cycle = Mock()
-        scraper.scrape_cycle.side_effect = [
-            requests.exceptions.Timeout("Timeout"),
-            CycleStats(succeeded=1, failed=0, notifications_sent=0),
+    def test_scrape_stockist_with_retry(self, mock_sleep, scraper, mock_stockist):
+        mock_stockist.get_amiibo.side_effect = [
+            Exception("Fail1"),
+            Exception("Fail2"),
+            [
+                {
+                    "Title": "Test",
+                    "Price": "$19.99",
+                    "Stock": "In stock",
+                    "URL": "https://test.com/1",
+                    "Website": "test.com",
+                    "Image": "https://test.com/img.jpg",
+                    "Colour": 0x00FF00,
+                }
+            ],
         ]
-        result = scraper.scrape()
-        assert scraper.scrape_cycle.call_count == 2
-        assert result.status == RunStatus.SUCCESS
-        mock_sleep.assert_called_once()
+
+        result = scraper._scrape_stockist(mock_stockist)
+
+        assert len(result) == 1
+        assert mock_stockist.get_amiibo.call_count == 3
+        assert mock_sleep.call_count == 2
 
     @patch("time.sleep")
-    def test_scrape_max_retries_returns_failure(self, mock_sleep, scraper):
-        scraper.scrape_cycle = Mock()
-        scraper.scrape_cycle.side_effect = requests.exceptions.Timeout("Timeout")
-        result = scraper.scrape()
-        assert scraper.scrape_cycle.call_count == 3
-        assert result.status == RunStatus.FAILURE
-        assert result.exit_code == 3
-        assert result.failure_category == FailureCategory.NETWORK
-        assert len(result.errors) > 0
+    def test_scrape_stockist_max_retries(self, mock_sleep, scraper, mock_stockist):
+        mock_stockist.get_amiibo.side_effect = Exception("Always fails")
+
+        with pytest.raises(Exception):
+            scraper._scrape_stockist(mock_stockist)
+
+        assert mock_stockist.get_amiibo.call_count == 3
 
     @patch("time.sleep")
-    def test_scrape_too_many_redirects_returns_failure(self, mock_sleep, scraper):
-        scraper.scrape_cycle = Mock()
-        scraper.scrape_cycle.side_effect = requests.exceptions.TooManyRedirects(
-            "Redirects"
-        )
-        result = scraper.scrape()
-        assert scraper.scrape_cycle.call_count == 1
-        assert result.status == RunStatus.FAILURE
-        assert result.exit_code == 3
-        mock_sleep.assert_not_called()
+    def test_scrape_stockist_backoff(self, mock_sleep, scraper, mock_stockist):
+        mock_stockist.get_amiibo.side_effect = [
+            Exception("Fail1"),
+            Exception("Fail2"),
+            [
+                {
+                    "Title": "Test",
+                    "Price": "$19.99",
+                    "Stock": "In stock",
+                    "URL": "https://test.com/1",
+                    "Website": "test.com",
+                    "Image": "https://test.com/img.jpg",
+                    "Colour": 0x00FF00,
+                }
+            ],
+        ]
 
-    @patch("time.sleep")
-    def test_scrape_unexpected_error_returns_failure(self, mock_sleep, scraper):
+        scraper._scrape_stockist(mock_stockist)
+
+        calls = mock_sleep.call_args_list
+        assert calls[0][0][0] == 2
+        assert calls[1][0][0] == 4
+
+    def test_scrape_handles_exception(self, scraper):
         scraper.scrape_cycle = Mock()
-        scraper.scrape_cycle.side_effect = ValueError("Unexpected error")
+        scraper.scrape_cycle.side_effect = Exception("Unexpected")
+
         result = scraper.scrape()
-        assert scraper.scrape_cycle.call_count == 1
+
         assert result.status == RunStatus.FAILURE
         assert result.exit_code == 3
-        mock_sleep.assert_not_called()
 
     def test_scrape_cycle_empty_stockists(self, mock_config, mock_database):
         empty_stockists = Mock()
@@ -313,20 +333,6 @@ class TestScraper:
         assert len(call_args[0][0]) == 1
         assert call_args[0][0][0]["Title"] == "Valid Amiibo"
         assert result.succeeded == 1
-
-    @patch("time.sleep")
-    def test_scrape_exponential_backoff_returns_result(self, mock_sleep, scraper):
-        scraper.scrape_cycle = Mock()
-        scraper.scrape_cycle.side_effect = [
-            requests.exceptions.Timeout("Timeout"),
-            requests.exceptions.Timeout("Timeout"),
-            CycleStats(succeeded=1, failed=0, notifications_sent=0),
-        ]
-        result = scraper.scrape()
-        calls = mock_sleep.call_args_list
-        assert calls[0][0][0] == 2
-        assert calls[1][0][0] == 4
-        assert result.status == RunStatus.SUCCESS
 
     def test_scrape_cycle_with_suppressed_notifications(
         self, scraper, mock_stockist, mock_database, mock_messenger

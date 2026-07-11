@@ -5,7 +5,6 @@ description = "Amiibo stock checker"
 requires-python = ">=3.13"
 dependencies = [
     "beautifulsoup4>=4.15.0",
-    "chromedriver-autoinstaller>=0.6.4",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
     "requests>=2.33.0",
@@ -31,7 +30,7 @@ dev = [
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
-include = ["amiibot.py", "scraper.py", "database.py", "utils.py", "constants.py", "result.py"]
+include = ["amiibot.py", "scraper.py", "database.py", "utils.py", "constants.py", "result.py", "models.py", "config/config.py", "messenger/"]
 exclude = ["tests", "site", "docs", "htmlcov", "__pycache__", ".mypy_cache", ".ruff_cache"]
 reportMissingTypeStubs = false
 reportMissingImports = true
