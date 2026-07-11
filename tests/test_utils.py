@@ -154,13 +154,13 @@ class TestUtilityFunctions:
         assert result == "File not found"
 
     def test_health_check_database(self):
-        """Test database health check."""
         from utils import HealthCheck
         from database import Database
         from config.config import Database as DatabaseConfig
 
         config = DatabaseConfig(engine="sqlite", name="test_health")
         db = Database(config)
+        db.ensure_schema()
 
         try:
             is_healthy, error = HealthCheck.check_database(db)

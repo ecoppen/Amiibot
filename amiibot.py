@@ -1,3 +1,5 @@
+import fcntl
+import io
 import logging
 import os
 from pathlib import Path
@@ -45,11 +47,25 @@ log = logging.getLogger(__name__)
 
 _database: Database | None = None
 _messengers: MessageManager | None = None
+_lock_file: io.TextIOWrapper | None = None
+_LOCK_PATH = Path(Path().resolve(), ".amiibot.lock")
 
 
 def cleanup() -> None:
     """Release resources without deciding the process exit code."""
     log.info("Shutting down gracefully...")
+    global _lock_file
+    if _lock_file is not None:
+        try:
+            fcntl.flock(_lock_file, fcntl.LOCK_UN)
+            _lock_file.close()
+        except Exception as e:
+            log.warning(f"Error releasing lock: {e}")
+        _lock_file = None
+        try:
+            _LOCK_PATH.unlink(missing_ok=True)
+        except Exception:
+            pass
     if _database is not None:
         try:
             log.info("Disposing database engine...")
@@ -60,12 +76,26 @@ def cleanup() -> None:
 
 
 def main() -> RunResult:
+    global _lock_file
+    try:
+        _lock_file = open(_LOCK_PATH, "w")
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        log.error("Another instance is already running. Exiting.")
+        return RunResult(
+            status=RunStatus.FAILURE,
+            exit_code=1,
+            failure_category=FailureCategory.UNEXPECTED,
+            errors=["Another instance is already running"],
+        )
+
     config_path = Path("config", "config.json")
     config = load_config(path=config_path)
     log.info(f"{config_path} loaded")
 
     global _database, _messengers
     _database = Database(config=config.database)
+    _database.ensure_schema()
     _messengers = MessageManager(config=config.messengers)
     stockists = StockistManager(messengers=_messengers)
     scraper = Scraper(config=config, stockists=stockists, database=_database)

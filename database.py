@@ -4,10 +4,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import sqlalchemy as db
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from config.config import Database as Database_
 from constants import (
+    DB_MAX_OVERFLOW,
+    DB_POOL_SIZE,
     NOTIFICATION_COOLDOWN_MINUTES,
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
@@ -22,6 +25,7 @@ class Base(DeclarativeBase):
 
 class AmiiboStock(Base):
     __tablename__ = "amiibo_stock"
+    __table_args__ = (UniqueConstraint("Website", "URL"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     Website: Mapped[str]
@@ -35,6 +39,17 @@ class AmiiboStock(Base):
     missed_count: Mapped[int] = mapped_column(default=0)
     last_notified_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_notified_status: Mapped[str | None] = mapped_column(nullable=True)
+
+
+class NotificationOutbox(Base):
+    __tablename__ = "notification_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    website: Mapped[str]
+    url: Mapped[str]
+    title: Mapped[str]
+    stock_status: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
 
 class LastScraped(Base):
@@ -60,24 +75,37 @@ class ScrapingFailure(Base):
 
 class Database:
     def __init__(self, config: Database_) -> None:
+        pool_kwargs: dict[str, Any] = dict(
+            pool_size=DB_POOL_SIZE,
+            max_overflow=DB_MAX_OVERFLOW,
+            pool_pre_ping=True,
+        )
         if config.engine == "postgres":
-            engine_string = f"{config.username}:{config.password}@{config.host}:{config.port}/{config.name}"  # noqa: E501
-            self.engine = db.create_engine("postgresql+psycopg2://" + engine_string)
+            url = db.URL.create(
+                "postgresql+psycopg2",
+                username=config.username,
+                password=config.password,
+                host=str(config.host) if config.host else "127.0.0.1",
+                port=config.port or 5432,
+                database=config.name,
+            )
+            self.engine = db.create_engine(url, **pool_kwargs)
         elif config.engine == "sqlite":
             self.engine = db.create_engine(
                 "sqlite:///" + config.name + ".db?check_same_thread=false"
             )
         else:
-            raise Exception(f"{config.engine} setup has not been defined")
+            raise ValueError(f"{config.engine} engine is not supported")
 
-        log.info(f"{config.engine} loaded")
+        log.info(f"{config.engine} engine created")
 
         self._engine_type = config.engine
-
         self.Session = sessionmaker(bind=self.engine)
+
+    def ensure_schema(self) -> None:
         Base.metadata.create_all(self.engine)
         self._run_migrations()
-        log.info("database tables loaded")
+        log.info("database schema ensured")
 
     def _run_migrations(self) -> None:
         if self._engine_type == "sqlite":
@@ -457,10 +485,8 @@ class Database:
     def _handle_price_change(
         self, session: Any, item: AmiiboStock, new_price: str
     ) -> dict[str, Any]:
-        """Handle price change for an item."""
-        log.info(f"Price changed for {item.Title} " f"from {item.Price} to {new_price}")
+        log.info(f"Price changed for {item.Title} from {item.Price} to {new_price}")
         item.Price = new_price
-        session.commit()
         return {
             "Colour": 0xFFFFFF,
             "Title": item.Title,
@@ -472,10 +498,8 @@ class Database:
         }
 
     def _handle_delisted_item(self, session: Any, item: AmiiboStock) -> dict[str, Any]:
-        """Handle delisted item."""
         log.info(f"{item.Title} is no longer listed")
         session.delete(item)
-        session.commit()
         return {
             "Colour": 0xFF0000,
             "Title": item.Title,
@@ -489,7 +513,6 @@ class Database:
     def _add_new_items(
         self, session: Any, new_items: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Add new items to database."""
         added = []
         for datum in new_items:
             log.info(f"Adding {datum['Title']}")
@@ -505,73 +528,74 @@ class Database:
             )
             session.add(amiibo)
             added.append(datum)
-        session.commit()
         return added
 
     def check_then_add_or_update_amiibo(
         self, data: list[dict[str, Any]], skip_delisting: bool = False
     ) -> list[dict[str, Any]]:
-        """Check and update amiibo stock in database.
-
-        Args:
-            data: List of validated amiibo data dicts from the scraper.
-            skip_delisting: If True, do not mark any items as delisted
-                (used when the scrape looks unhealthy / partial).
-        """
         if not data:
             return []
 
         statistics = {"New": 0, "Updated": 0, "Deleted": 0}
-        output = []
+        output: list[dict[str, Any]] = []
         website = data[0]["Website"]
 
         with self.Session() as session:
-            existing_items = session.query(AmiiboStock).filter_by(Website=website).all()
+            try:
+                existing_items = (
+                    session.query(AmiiboStock).filter_by(Website=website).all()
+                )
 
-            if not existing_items:
-                new_items = self._add_new_items(session, data)
-                statistics["New"] = len(new_items)
-                log.info(f"New items saved: {statistics['New']}")
-                return data
+                if not existing_items:
+                    added = self._add_new_items(session, data)
+                    statistics["New"] = len(added)
+                    log.info(f"New items saved: {statistics['New']}")
+                    session.commit()
+                    return added
 
-            existing_map = {
-                item.URL: (item.id, item.Price, item.Title, item.Image)
-                for item in existing_items
-            }
-            new_data_map = {datum["URL"]: datum for datum in data}
+                existing_map = {
+                    item.URL: (item.id, item.Price, item.Title, item.Image)
+                    for item in existing_items
+                }
+                new_data_map = {datum["URL"]: datum for datum in data}
 
-            for item in existing_items:
-                if item.URL in new_data_map:
-                    new_datum = new_data_map[item.URL]
-                    item.missed_count = 0
-                    if self.remove_currency(new_datum["Price"]) != self.remove_currency(
-                        item.Price
-                    ):
-                        statistics["Updated"] += 1
-                        output.append(
-                            self._handle_price_change(session, item, new_datum["Price"])
+                for item in existing_items:
+                    if item.URL in new_data_map:
+                        new_datum = new_data_map[item.URL]
+                        item.missed_count = 0
+                        if self.remove_currency(
+                            new_datum["Price"]
+                        ) != self.remove_currency(item.Price):
+                            statistics["Updated"] += 1
+                            output.append(
+                                self._handle_price_change(
+                                    session, item, new_datum["Price"]
+                                )
+                            )
+                    elif skip_delisting:
+                        log.debug(
+                            f"Skipping delisting check for {item.Title} (health check active)"
                         )
-                elif skip_delisting:
-                    log.debug(
-                        f"Skipping delisting check for {item.Title} (health check active)"
-                    )
-                else:
-                    item.missed_count += 1
-                    log.info(
-                        f"{item.Title} missed {item.missed_count} time(s) "
-                        f"(grace: {SCRAPING_FAILURE_GRACE_PERIOD})"
-                    )
-                    if item.missed_count >= SCRAPING_FAILURE_GRACE_PERIOD:
-                        statistics["Deleted"] += 1
-                        output.append(self._handle_delisted_item(session, item))
+                    else:
+                        item.missed_count += 1
+                        log.info(
+                            f"{item.Title} missed {item.missed_count} time(s) "
+                            f"(grace: {SCRAPING_FAILURE_GRACE_PERIOD})"
+                        )
+                        if item.missed_count >= SCRAPING_FAILURE_GRACE_PERIOD:
+                            statistics["Deleted"] += 1
+                            output.append(self._handle_delisted_item(session, item))
 
-            new_items = [d for d in data if d["URL"] not in existing_map]
-            if new_items:
-                added = self._add_new_items(session, new_items)
-                output.extend(added)
-                statistics["New"] = len(added)
+                new_items = [d for d in data if d["URL"] not in existing_map]
+                if new_items:
+                    added = self._add_new_items(session, new_items)
+                    output.extend(added)
+                    statistics["New"] = len(added)
 
-            session.commit()
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
         log.info(
             f"Added: {statistics['New']}, "

@@ -23,12 +23,11 @@ class TestDatabase:
 
     @pytest.fixture
     def database(self, db_config):
-        """Create test database instance."""
         import os
 
         db = Database(db_config)
+        db.ensure_schema()
         yield db
-        # Cleanup: close engine and remove database file
         db.engine.dispose()
         try:
             db_file = f"{db_config.name}.db"
