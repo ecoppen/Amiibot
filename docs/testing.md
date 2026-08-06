@@ -1,10 +1,10 @@
 # Testing Guide
 
-Comprehensive guide for running tests in Amiibot.
+Guide for running tests in Amiibot.
 
 ---
 
-##  Overview
+## Overview
 
 Amiibot uses **pytest** for unit testing with coverage reporting. Tests run automatically on every push to GitHub via GitHub Actions.
 
@@ -18,7 +18,7 @@ Amiibot uses **pytest** for unit testing with coverage reporting. Tests run auto
 
 ---
 
-##  Quick Start
+## Quick Start
 
 ```bash
 # Install dependencies
@@ -42,26 +42,34 @@ uv run pytest tests/test_database.py::TestDatabase::test_remove_currency_us_form
 
 ---
 
-## 📁 Test Structure
+## Test Structure
 
 ```
 tests/
 ├── __init__.py
-├── test_config.py          # Configuration tests
-├── test_database.py        # Database tests
-└── test_utils.py           # Utility function tests
+├── test_amiibot_unit.py     # Entry point tests
+├── test_config.py           # Configuration tests
+├── test_database.py         # Database tests
+├── test_messenger.py        # Messenger tests
+├── test_scraper.py          # Scraper tests
+├── test_stockist.py         # Stockist tests
+└── test_utils.py            # Utility function tests
 ```
 
 ---
 
-## 🧪 Test Categories
+## Test Categories
 
 ### Unit Tests
 
 Test individual functions and methods in isolation:
-- **test_database.py** - Database operations, currency parsing, validation
-- **test_utils.py** - Utility functions (formatting, calculations, etc.)
+- **test_amiibot_unit.py** - Entry point, logging, cleanup
 - **test_config.py** - Configuration loading and validation
+- **test_database.py** - Database operations, currency parsing, validation
+- **test_messenger.py** - Discord/Telegram message sending
+- **test_scraper.py** - Scrape cycle, retries, notifications
+- **test_stockist.py** - Stockist construction, HTML/JSON parsing
+- **test_utils.py** - Utility functions (formatting, calculations, etc.)
 
 ### Integration Tests (Future)
 
@@ -72,7 +80,7 @@ Test interactions between components:
 
 ---
 
-##  Running Tests
+## Running Tests
 
 ### Run All Tests
 
@@ -131,7 +139,7 @@ uv run pytest --lf
 
 ---
 
-##  Coverage Reports
+## Coverage Reports
 
 ### Generate Coverage Report
 
@@ -165,7 +173,7 @@ Coverage settings are in `pytest.ini`:
 
 ---
 
-##  Writing Tests
+## Writing Tests
 
 ### Test Structure
 
@@ -223,7 +231,7 @@ def test_currency_parsing(self, database, input, expected):
 
 ---
 
-## 🤖 GitHub Actions (CI/CD)
+## GitHub Actions (CI/CD)
 
 ### Automatic Testing
 
@@ -234,9 +242,9 @@ Tests run automatically on:
 
 ### Workflow Jobs
 
-1. **Test** - Run tests on Python 3.12 and 3.13
-2. **Lint** - Run ruff, black, mypy
-3. **Security** - Run bandit security scanner
+1. **Test** - Run tests on Python 3.13
+2. **Lint** - Run ruff and black
+3. **Security** - Run pip-audit dependency scanner
 
 ### View Results
 
@@ -254,7 +262,7 @@ Add to README.md:
 
 ---
 
-## 🐛 Debugging Tests
+## Debugging Tests
 
 ### Run with Debugging
 
@@ -281,7 +289,7 @@ uv run pytest -vv
 
 ---
 
-## 📚 Test Examples
+## Test Examples
 
 ### Database Test Example
 
@@ -322,7 +330,7 @@ def test_config_validation_empty_stockists(self):
 
 ---
 
-##  Test Coverage Goals
+## Test Coverage Goals
 
 | Component | Current | Goal |
 |-----------|---------|------|
@@ -333,7 +341,7 @@ def test_config_validation_empty_stockists(self):
 
 ---
 
-## 🔄 Continuous Integration
+## Continuous Integration
 
 ### Local Pre-commit
 
@@ -348,16 +356,16 @@ pre-commit run --all-files
 ### CI Pipeline
 
 On every push:
-1. ✅ Run all tests
-2. ✅ Check code formatting (black)
-3. ✅ Check linting (ruff)
-4. ✅ Check types (mypy)
-5. ✅ Security scan (bandit)
-6. ✅ Generate coverage report
+1. Run all tests
+2. Check code formatting (black)
+3. Check linting (ruff)
+4. Security scan (pip-audit)
+5. Generate coverage report
+6. Upload coverage to Codecov
 
 ---
 
-## 📖 Additional Resources
+## Additional Resources
 
 - [pytest documentation](https://docs.pytest.org/)
 - [pytest fixtures](https://docs.pytest.org/en/stable/fixture.html)
@@ -366,7 +374,7 @@ On every push:
 
 ---
 
-## 🆘 Troubleshooting
+## Troubleshooting
 
 ### Tests Not Found
 
@@ -397,7 +405,7 @@ uv run python -c "import sys; print(sys.path)"
 
 ---
 
-## ✨ Summary
+## Summary
 
 - **Run tests**: `uv run pytest`
 - **With coverage**: `uv run pytest --cov`

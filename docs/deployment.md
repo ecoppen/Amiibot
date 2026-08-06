@@ -19,14 +19,14 @@ crontab -e
 ```
 
 **Advantages:**
-- ✅ Simple setup
-- ✅ No additional services
-- ✅ Works on any system with cron
+- Simple setup
+- No additional services
+- Works on any system with cron
 
 **Disadvantages:**
-- ❌ No automatic restart on failure
-- ❌ Limited monitoring
-- ❌ Manual log management
+- No automatic restart on failure
+- Limited monitoring
+- Manual log management
 
 ---
 
@@ -113,10 +113,10 @@ sudo systemctl status amiibot
 ```
 
 **Advantages:**
-- ✅ Automatic restart on failure
-- ✅ Integrated logging
-- ✅ System-level management
-- ✅ Starts on boot
+- Automatic restart on failure
+- Integrated logging
+- System-level management
+- Starts on boot
 
 ## Production Checklist
 

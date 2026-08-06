@@ -39,10 +39,10 @@ python amiibot.py
 
 ### Supported Platforms
 
-- ✅ Linux (Ubuntu, Debian, CentOS, etc.)
-- ✅ macOS (10.15+)
-- ✅ Windows (10/11)
-- ✅ Raspberry Pi (3B+ or newer)
+- Linux (Ubuntu, Debian, CentOS, etc.)
+- macOS (10.15+)
+- Windows (10/11)
+- Raspberry Pi (3B+ or newer)
 
 ### Software Requirements
 
@@ -58,7 +58,7 @@ python amiibot.py
 
 ---
 
-##  Installation
+## Installation
 
 ### Method 1: Using uv (Recommended)
 
@@ -115,7 +115,7 @@ pre-commit install
 
 ---
 
-##  Configuration
+## Configuration
 
 ### Step 1: Create Configuration File
 
@@ -250,7 +250,7 @@ Minimal configuration example:
 
 ---
 
-##  Running the Bot
+## Running the Bot
 
 ### Manual Execution
 
@@ -309,7 +309,7 @@ chmod +x amiibot_runner.sh
 
 ---
 
-##  Verification
+## Verification
 
 ### Check Logs
 

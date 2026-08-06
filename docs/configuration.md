@@ -70,10 +70,10 @@ Recommended for production and multi-instance deployments.
 | `name` | string | Yes | `"amiibot"` | Database name |
 
 **Advantages:**
-- ✅ Better for production
-- ✅ Supports multiple instances
-- ✅ Better concurrent access
-- ✅ Advanced features
+- Better for production
+- Supports multiple instances
+- Better concurrent access
+- Advanced features
 
 **Setup:**
 

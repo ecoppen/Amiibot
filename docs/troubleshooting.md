@@ -270,7 +270,7 @@ Run these commands to verify system health:
 
 ```bash
 # Check Python version
-python --version  # Should be 3.12+
+python --version  # Should be 3.13+
 
 # Check dependencies
 pip list | grep -E "beautifulsoup4|selenium|sqlalchemy"
