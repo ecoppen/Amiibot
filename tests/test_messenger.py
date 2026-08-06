@@ -206,6 +206,67 @@ class TestDiscord:
 
         assert result.status == DeliveryStatus.SUCCESS
 
+    def test_format_embed_data(self, discord_messenger):
+        options, payload = discord_messenger.format_embed_data(
+            {
+                "Title": "Test Amiibo",
+                "Colour": 0xFF0000,
+                "URL": "https://test.com/product",
+                "Image": "https://test.com/image file.jpg",
+                "Price": "$19.99",
+                "Stock": "In stock",
+                "Website": "test.com",
+            }
+        )
+
+        assert options["title"] == "Test Amiibo"
+        assert options["color"] == 0xFF0000
+        assert options["url"] == "https://test.com/product"
+        assert options["thumbnail"] == {"url": "https://test.com/image%20file.jpg"}
+        assert payload == {
+            "Price": "$19.99",
+            "Stock": "In stock",
+            "Website": "test.com",
+        }
+
+    def test_format_embed_data_ignores_unknown_keys(self, discord_messenger):
+        options, payload = discord_messenger.format_embed_data(
+            {"Title": "Test", "Unknown": "ignored"}
+        )
+
+        assert options == {"title": "Test"}
+        assert payload == {}
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_send_embed_message_payload_structure(self, mock_post, discord_messenger):
+        mock_post.return_value = DeliveryResult(
+            status=DeliveryStatus.SUCCESS,
+            messenger_name="test_discord",
+            http_status=200,
+        )
+
+        discord_messenger.send_embed_message(
+            {
+                "Title": "Test",
+                "Colour": 0x00FF00,
+                "URL": "https://test.com",
+                "Image": "https://test.com/img.jpg",
+                "Price": "$5.00",
+                "Stock": "In stock",
+                "Website": "test.com",
+            }
+        )
+
+        sent_data = mock_post.call_args.kwargs["json"]
+        assert sent_data["content"] == "Stock alert"
+        assert sent_data["embeds"][0]["title"] == "Test"
+        assert sent_data["embeds"][0]["color"] == 0x00FF00
+        assert len(sent_data["embeds"][0]["fields"]) == 3
+        assert sent_data["embeds"][0]["fields"][0]["name"] == "Price"
+        assert sent_data["embeds"][0]["fields"][0]["value"] == "$5.00"
+        assert sent_data["embeds"][0]["fields"][0]["inline"] is True
+        assert "text" in sent_data["embeds"][0]["footer"]
+
     def test_send_embed_message_inactive(self):
         discord = Discord(
             name="test_discord",

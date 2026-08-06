@@ -66,6 +66,62 @@ class TestStockist:
             url="https://test.com", payload={"key": "value"}
         )
 
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_scrape_with_selenium_success(self, mock_wait, mock_chrome, stockist):
+        """Test selenium scraping returns page source."""
+        mock_driver = Mock()
+        mock_driver.page_source = "<html>test</html>"
+        mock_chrome.return_value = mock_driver
+
+        result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
+
+        assert result == "<html>test</html>"
+        mock_driver.quit.assert_called_once()
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_scrape_with_selenium_timeout(self, mock_wait, mock_chrome, stockist):
+        """Test selenium timeout returns empty string."""
+        from selenium.common.exceptions import TimeoutException
+
+        mock_wait.return_value.until.side_effect = TimeoutException("timed out")
+        mock_driver = Mock()
+        mock_chrome.return_value = mock_driver
+
+        result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
+
+        assert result == ""
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_scrape_with_selenium_webdriver_exception(
+        self, mock_wait, mock_chrome, stockist
+    ):
+        """Test WebDriverException returns empty string."""
+        from selenium.common.exceptions import WebDriverException
+
+        mock_wait.return_value.until.side_effect = WebDriverException("no driver")
+        mock_driver = Mock()
+        mock_chrome.return_value = mock_driver
+
+        result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
+
+        assert result == ""
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_scrape_with_selenium_quit_error(self, mock_wait, mock_chrome, stockist):
+        """Test quit errors are caught."""
+        mock_driver = Mock()
+        mock_driver.page_source = "<html>test</html>"
+        mock_driver.quit.side_effect = Exception("quit failed")
+        mock_chrome.return_value = mock_driver
+
+        result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
+
+        assert result == "<html>test</html>"
+
 
 class TestUserAgent:
     """Test UserAgent class."""
@@ -90,6 +146,74 @@ class TestUserAgent:
         for agent in agents:
             assert isinstance(agent, str)
             assert len(agent) > 0
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_timeout_falls_back(self, mock_get):
+        """Test timeout falls back to base agents."""
+        mock_get.side_effect = requests.exceptions.Timeout
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_connection_error_falls_back(self, mock_get):
+        """Test connection error falls back to base agents."""
+        mock_get.side_effect = requests.exceptions.ConnectionError
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_http_error_falls_back(self, mock_get):
+        """Test HTTP error falls back to base agents."""
+        mock_get.side_effect = requests.exceptions.HTTPError
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_unexpected_error_falls_back(self, mock_get):
+        """Test unexpected error falls back to base agents."""
+        mock_get.side_effect = RuntimeError("boom")
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_success_updates_agents(self, mock_get):
+        """Test successful fetch updates base agents."""
+        mock_response = Mock()
+        mock_response.content = b"""
+        <html>
+            <textarea class="form-control">Mozilla/5.0 (X11; Linux) A</textarea>
+            <textarea class="form-control">Mozilla/5.0 (X11; Linux) B</textarea>
+        </html>
+        """
+        mock_get.return_value = mock_response
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert len(agents) == 2
+        assert agents[0].startswith("Mozilla/5.0 (X11; Linux) A")
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_no_textareas_keeps_base(self, mock_get):
+        """Test empty response keeps base agents."""
+        mock_response = Mock()
+        mock_response.content = b"<html></html>"
+        mock_get.return_value = mock_response
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
+
+    @patch("stockist.useragents.requests.get")
+    def test_get_user_agents_parse_error_keeps_base(self, mock_get):
+        """Test parse errors keep base agents."""
+        mock_response = Mock()
+        mock_response.content = None
+        mock_get.return_value = mock_response
+        ua = UserAgent()
+        agents = ua.get_user_agents()
+        assert agents == ua.base_agents
 
 
 class TestStockistUtils:
@@ -130,6 +254,70 @@ class TestStockistUtils:
         result = send_public_request(url="https://test.com", payload=None)
 
         assert isinstance(result, BlankResponse)
+
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_http_error(self, mock_session_fn):
+        from stockist.utils import BlankResponse
+
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.HTTPError
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_request(url="https://test.com", payload=None)
+
+        assert isinstance(result, BlankResponse)
+
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_too_many_redirects(self, mock_session_fn):
+        from stockist.utils import BlankResponse
+
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.TooManyRedirects
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_request(url="https://test.com", payload=None)
+
+        assert isinstance(result, BlankResponse)
+
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_generic_request_exception(self, mock_session_fn):
+        from stockist.utils import BlankResponse
+
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.RequestException
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_request(url="https://test.com", payload=None)
+
+        assert isinstance(result, BlankResponse)
+
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_appends_query_string(self, mock_session_fn):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b"Success"
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+        mock_session_fn.return_value = mock_session
+
+        send_public_request(url="https://test.com", payload={"q": "amiibo", "p": 1})
+
+        called_url = mock_session.get.call_args.kwargs["url"]
+        assert called_url == "https://test.com?q=amiibo&p=1"
+
+    @patch("stockist.utils._get_session")
+    def test_send_public_request_no_payload_no_query(self, mock_session_fn):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b"Success"
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+        mock_session_fn.return_value = mock_session
+
+        send_public_request(url="https://test.com", payload=None)
+
+        called_url = mock_session.get.call_args.kwargs["url"]
+        assert called_url == "https://test.com"
 
 
 class TestStockistManager:

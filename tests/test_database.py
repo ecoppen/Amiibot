@@ -550,3 +550,102 @@ class TestDatabase:
             second_failure_time = failure.last_failure
 
         assert second_failure_time > first_failure_time
+
+    def test_build_idempotency_key_stable(self, database):
+        """Test idempotency keys are stable and unique."""
+        key1 = database.build_idempotency_key(
+            url="https://test.com/1", website="test.com", stock_status="In stock"
+        )
+        key2 = database.build_idempotency_key(
+            url="https://test.com/1", website="test.com", stock_status="In stock"
+        )
+        key3 = database.build_idempotency_key(
+            url="https://test.com/1", website="test.com", stock_status="Out of Stock"
+        )
+
+        assert key1 == key2
+        assert key1 != key3
+        assert len(key1) == 32
+
+    def test_record_delivery_and_was_delivered(self, database):
+        """Test delivery recording and lookup."""
+        from result import DeliveryStatus
+
+        key = database.build_idempotency_key(
+            url="https://test.com/1", website="test.com", stock_status="In stock"
+        )
+
+        assert database.was_delivered_to(key, "discord") is False
+
+        database.record_delivery(
+            idempotency_key=key,
+            website="test.com",
+            url="https://test.com/1",
+            title="Test",
+            stock_status="In stock",
+            messenger_name="discord",
+            delivery_status=DeliveryStatus.SUCCESS.value,
+        )
+
+        assert database.was_delivered_to(key, "discord") is True
+        assert database.was_delivered_to(key, "telegram") is False
+
+    def test_record_delivery_is_idempotent(self, database):
+        """Test duplicate deliveries are not recorded twice."""
+        key = "same-key"
+
+        database.record_delivery(
+            idempotency_key=key,
+            website="test.com",
+            url="https://test.com/1",
+            title="Test",
+            stock_status="In stock",
+            messenger_name="discord",
+            delivery_status="Success",
+        )
+        database.record_delivery(
+            idempotency_key=key,
+            website="test.com",
+            url="https://test.com/1",
+            title="Test",
+            stock_status="In stock",
+            messenger_name="discord",
+            delivery_status="Success",
+        )
+
+        from database import NotificationDelivery
+
+        with database.Session() as session:
+            count = (
+                session.query(NotificationDelivery)
+                .filter_by(idempotency_key=key, messenger_name="discord")
+                .count()
+            )
+            assert count == 1
+
+    def test_was_delivered_false_for_failed_status(self, database):
+        """Test failed deliveries do not count as delivered."""
+        from result import DeliveryStatus
+
+        key = "failed-key"
+
+        database.record_delivery(
+            idempotency_key=key,
+            website="test.com",
+            url="https://test.com/1",
+            title="Test",
+            stock_status="In stock",
+            messenger_name="discord",
+            delivery_status=DeliveryStatus.PERMANENT_FAILURE.value,
+        )
+
+        assert database.was_delivered_to(key, "discord") is False
+
+    def test_run_migrations_is_idempotent(self, database):
+        """Test migrations can run multiple times without error."""
+        database._run_migrations()
+        database._run_migrations()
+
+        with database.Session() as session:
+            item = session.query(AmiiboStock).first()
+            assert item is None or item.Website is not None

@@ -238,3 +238,87 @@ class TestAmiibotModuleStructure:
         from logging.handlers import RotatingFileHandler
 
         assert all([logging, os, sys, Path, RotatingFileHandler])
+
+
+class TestSecretRedactionFilter:
+    def test_filter_redacts_secrets_in_message(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="Bot token bot123456:abcdefghijklmnopqrstuvwxyz123 in message",
+            args=(),
+            exc_info=None,
+        )
+
+        SecretRedactionFilter().filter(record)
+
+        assert "abcdefghijklmnopqrstuvwxyz123" not in record.msg
+        assert (
+            record.msg != "Bot token bot123456:abcdefghijklmnopqrstuvwxyz123 in message"
+        )
+
+    def test_filter_redacts_secrets_in_args(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="Details: %s",
+            args=("webhook at https://discord.com/api/webhooks/123/secretToken123",),
+            exc_info=None,
+        )
+
+        SecretRedactionFilter().filter(record)
+
+        assert (
+            record.args[0]
+            != "webhook at https://discord.com/api/webhooks/123/secretToken123"
+        )
+        assert "secretToken123" not in record.args[0]
+        assert record.args[0].endswith("***")
+
+    def test_filter_keeps_non_string_args(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="Count: %s",
+            args=(42,),
+            exc_info=None,
+        )
+
+        SecretRedactionFilter().filter(record)
+
+        assert record.args == (42,)
+
+    def test_filter_returns_true(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="plain message",
+            args=(),
+            exc_info=None,
+        )
+
+        assert SecretRedactionFilter().filter(record) is True
