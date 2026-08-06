@@ -321,6 +321,19 @@ tail -f log.txt
 cat log.txt
 ```
 
+Log file entries are written as JSON lines, one object per entry:
+
+```bash
+# Query logs with jq
+tail -1 log.txt | jq '.ts, .level, .logger, .message'
+```
+
+For JSON output on the console as well:
+
+```bash
+uv run python amiibot.py --log-json
+```
+
 ### Check Database
 
 ```bash
