@@ -334,10 +334,10 @@ def test_config_validation_empty_stockists(self):
 
 | Component | Current | Goal |
 |-----------|---------|------|
-| Database | 80%+ | 90%+ |
-| Utils | 90%+ | 95%+ |
-| Config | 85%+ | 90%+ |
-| **Overall** | **85%+** | **90%+** |
+| Database | 84%+ | 90%+ |
+| Utils | 99%+ | 95%+ |
+| Config | 88%+ | 90%+ |
+| **Overall** | **95%+** | **90%+** |
 
 ---
 
