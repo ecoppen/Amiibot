@@ -51,7 +51,14 @@ class Scraper:
                     f"  {sr.name}: {'OK' if sr.success else 'FAIL'} "
                     f"items={sr.item_count} "
                     f"{sr.duration_seconds}s "
-                    f"failures={sr.consecutive_failures}"
+                    f"failures={sr.consecutive_failures}",
+                    extra={
+                        "stockist": sr.name,
+                        "success": sr.success,
+                        "item_count": sr.item_count,
+                        "duration_seconds": sr.duration_seconds,
+                        "consecutive_failures": sr.consecutive_failures,
+                    },
                 )
             return RunResult(
                 status=(RunStatus.SUCCESS if cycle.failed == 0 else RunStatus.PARTIAL),
@@ -95,7 +102,7 @@ class Scraper:
         stockist_results: list[StockistResult] = []
 
         for stockist in self.stockists.all_stockists:
-            log.info(f"Scraping {stockist.name}")
+            log.info(f"Scraping {stockist.name}", extra={"stockist": stockist.name})
             start_time = time.monotonic()
 
             try:
@@ -119,7 +126,10 @@ class Scraper:
                 failed += 1
                 continue
 
-            log.info(f"Scraped {len(scraped)} items from {stockist.name}")
+            log.info(
+                f"Scraped {len(scraped)} items from {stockist.name}",
+                extra={"stockist": stockist.name, "item_count": len(scraped)},
+            )
 
             self.database.record_scrape_attempt(stockist=stockist.name)
 

@@ -1,3 +1,4 @@
+import argparse
 import fcntl
 import io
 import logging
@@ -12,36 +13,48 @@ from messenger.manager import MessageManager
 from result import FailureCategory, RunResult, RunStatus
 from scraper import Scraper
 from stockist.manager import StockistManager
+from utils import JSONFormatter
 
 logs_file = Path(Path().resolve(), LOG_FILE_NAME)
 logs_file.touch(exist_ok=True)
 
 log = logging.getLogger(__name__)
 
-rotating_handler = RotatingFileHandler(
-    logs_file,
-    maxBytes=LOG_MAX_BYTES,
-    backupCount=LOG_BACKUP_COUNT,
-)
-rotating_handler.setFormatter(
-    logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-)
+_HUMAN_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_HUMAN_DATEFMT = "%Y-%m-%d %H:%M:%S"
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(
-    logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-)
 
-logging.basicConfig(
-    level=os.environ.get("LOGLEVEL", "INFO"),
-    handlers=[rotating_handler, console_handler],
-)
+def setup_logging(log_json: bool = False) -> None:
+    """Configure rotating file and console handlers.
+
+    File logs are always JSON lines. Console output is human-readable by
+    default; pass ``log_json=True`` to emit JSON on the console too.
+    """
+    file_formatter: logging.Formatter = JSONFormatter()
+    console_formatter: logging.Formatter = (
+        JSONFormatter()
+        if log_json
+        else logging.Formatter(_HUMAN_FORMAT, datefmt=_HUMAN_DATEFMT)
+    )
+
+    rotating_handler = RotatingFileHandler(
+        logs_file,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+    )
+    rotating_handler.setFormatter(file_formatter)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(console_formatter)
+
+    logging.basicConfig(
+        level=os.environ.get("LOGLEVEL", "INFO"),
+        handlers=[rotating_handler, console_handler],
+        force=True,
+    )
+
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(SecretRedactionFilter())
 
 
 class SecretRedactionFilter(logging.Filter):
@@ -57,6 +70,8 @@ class SecretRedactionFilter(logging.Filter):
 
 for handler in logging.getLogger().handlers:
     handler.addFilter(SecretRedactionFilter())
+
+setup_logging()
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +105,7 @@ def cleanup() -> None:
     log.info("Shutdown complete")
 
 
-def main() -> RunResult:
+def main(log_json: bool = False) -> RunResult:
     global _lock_file
     try:
         _lock_file = open(_LOCK_PATH, "w")
@@ -122,6 +137,14 @@ def main() -> RunResult:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Amiibo stock checker and notifier")
+    parser.add_argument(
+        "--log-json",
+        action="store_true",
+        help="Emit JSON log lines on the console (file logs are always JSON)",
+    )
+    args = parser.parse_args()
+    setup_logging(log_json=args.log_json)
     try:
         result = main()
     except KeyboardInterrupt:

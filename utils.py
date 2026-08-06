@@ -5,11 +5,60 @@ This module provides helper functions for common operations like validation,
 formatting, and utility tasks.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
+
+
+class JSONFormatter(logging.Formatter):
+    """Format log records as single-line JSON objects.
+
+    Emits keys ``ts`` (ISO8601 UTC timestamp), ``level``, ``logger`` and
+    ``message``. Any extra fields passed via the ``extra`` keyword of a log
+    call are included as-is.
+    """
+
+    _SKIPPED_KEYS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "taskName",
+            "message",
+        }
+    )
+
+    def format(self, record: logging.LogRecord) -> str:
+        data: dict[str, Any] = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in data and key not in self._SKIPPED_KEYS:
+                data[key] = value
+        return json.dumps(data)
 
 
 def format_price(price: float, currency: str = "$") -> str:
