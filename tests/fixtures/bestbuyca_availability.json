@@ -1,0 +1,146 @@
+{
+  "availabilities": [
+    {
+      "isGiftCard": false,
+      "isService": false,
+      "pickup": {
+        "locations": [],
+        "purchasable": false,
+        "status": "NotAvailable"
+      },
+      "saleChannelExclusivity": "InStoreAndOnline",
+      "scheduledDelivery": false,
+      "sellerId": "bbyca",
+      "shipping": {
+        "backorderable": false,
+        "countdownIsZone": false,
+        "freeShippingEligible": false,
+        "hasActiveCountdown": true,
+        "isBackorderable": false,
+        "isFreeShippingEligible": false,
+        "levelsOfServices": [
+          {
+            "carrierId": "PURO",
+            "carrierName": "Purolator QuickShip",
+            "deliveryDate": "2026-10-07T23:59:00Z",
+            "deliveryDateExpiresOn": "2026-10-06T22:27:00Z",
+            "deliveryDatePrecision": "1.00:00:00",
+            "id": "SOP_506-1016_0_0_PURO-QUICKSHIP_FS_LC0_REG-GTA",
+            "name": "Quickship",
+            "price": 7.99
+          }
+        ],
+        "orderLimit": null,
+        "preorderInfo": null,
+        "purchasable": true,
+        "quantityRemaining": 217,
+        "restrictedZoneRegions": [],
+        "scheduledDelivery": false,
+        "status": "InStock"
+      },
+      "sku": "19458528"
+    },
+    {
+      "isGiftCard": false,
+      "isService": false,
+      "pickup": {
+        "locations": [],
+        "purchasable": false,
+        "status": "Preorder"
+      },
+      "saleChannelExclusivity": "InStoreAndOnline",
+      "scheduledDelivery": false,
+      "sellerId": "bbyca",
+      "shipping": {
+        "backorderable": false,
+        "countdownIsZone": false,
+        "freeShippingEligible": false,
+        "hasActiveCountdown": true,
+        "isBackorderable": false,
+        "isFreeShippingEligible": false,
+        "levelsOfServices": [
+          {
+            "carrierId": "PRLA",
+            "carrierName": "Purolator",
+            "deliveryDate": "2026-11-12T23:59:00Z",
+            "deliveryDateExpiresOn": "2026-11-09T17:27:00Z",
+            "deliveryDatePrecision": "1.00:00:00",
+            "id": "SOP_506-916_2_0_PRLA-GROUND_FS_LC0_REG-ALL",
+            "name": "Ground",
+            "price": 6.99
+          }
+        ],
+        "orderLimit": 1,
+        "preorderInfo": {
+          "releaseDateTime": "2026-11-12T08:00:00Z"
+        },
+        "purchasable": true,
+        "quantityRemaining": 256,
+        "restrictedZoneRegions": [],
+        "scheduledDelivery": false,
+        "status": "Preorder"
+      },
+      "sku": "20151906"
+    },
+    {
+      "isGiftCard": false,
+      "isService": false,
+      "pickup": {
+        "locations": [],
+        "purchasable": false,
+        "status": "NotAvailable"
+      },
+      "saleChannelExclusivity": "InStoreAndOnline",
+      "scheduledDelivery": false,
+      "sellerId": "bbyca",
+      "shipping": {
+        "backorderable": false,
+        "countdownIsZone": false,
+        "freeShippingEligible": false,
+        "hasActiveCountdown": true,
+        "isBackorderable": false,
+        "isFreeShippingEligible": false,
+        "levelsOfServices": [],
+        "orderLimit": 2,
+        "preorderInfo": {
+          "releaseDateTime": "2027-12-31T08:00:00Z"
+        },
+        "purchasable": false,
+        "quantityRemaining": 0,
+        "restrictedZoneRegions": [],
+        "scheduledDelivery": false,
+        "status": "SoldOutOnline"
+      },
+      "sku": "20149882"
+    },
+    {
+      "isGiftCard": false,
+      "isService": false,
+      "pickup": {
+        "locations": [],
+        "purchasable": false,
+        "status": "NotAvailable"
+      },
+      "saleChannelExclusivity": "InStoreAndOnline",
+      "scheduledDelivery": false,
+      "sellerId": "bbyca",
+      "shipping": {
+        "backorderable": false,
+        "countdownIsZone": false,
+        "freeShippingEligible": false,
+        "hasActiveCountdown": true,
+        "isBackorderable": false,
+        "isFreeShippingEligible": false,
+        "levelsOfServices": [],
+        "orderLimit": 1,
+        "preorderInfo": null,
+        "purchasable": false,
+        "quantityRemaining": 0,
+        "restrictedZoneRegions": [],
+        "scheduledDelivery": false,
+        "status": "SoldOutOnline"
+      },
+      "sku": "19878028"
+    }
+  ]
+}

@@ -10,18 +10,16 @@ import pytest
 import requests
 from selenium.common.exceptions import WebDriverException
 
+from constants import REQUEST_TIMEOUT
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
-from stockist.game import Game
 from stockist.gamestop import Gamestop
 from stockist.manager import STOCKIST_FACTORY, StockistManager
-from stockist.mecchajapan import MecchaJapan
 from stockist.nintendouk import NintendoUK
 from stockist.playasia import PlayAsia
 from stockist.shopto import Shopto
 from stockist.stockist import Stock, Stockist
-from stockist.thesource import TheSource
 from stockist.utils import send_public_request
 
 
@@ -79,8 +77,18 @@ class TestStockist:
 
         assert result == mock_response
         mock_request.assert_called_once_with(
-            url="https://test.com", payload={"key": "value"}
+            url="https://test.com",
+            payload={"key": "value"},
+            timeout=REQUEST_TIMEOUT,
         )
+
+    @patch("stockist.stockist.send_public_request")
+    def test_scrape_uses_the_stockist_timeout(self, mock_request, stockist):
+        stockist.request_timeout = 30
+
+        stockist.scrape(url="https://test.com", payload=None)
+
+        assert mock_request.call_args.kwargs["timeout"] == 30
 
     @patch("stockist.stockist.webdriver.Chrome")
     @patch("stockist.stockist.WebDriverWait")
@@ -141,6 +149,90 @@ class TestStockist:
         result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
 
         assert result == "<html>test</html>"
+
+
+class TestScrapeWithSeleniumPayload:
+    @pytest.fixture
+    def stockist(self):
+        return Stockist(messengers=["test_messenger"])
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_payload_is_appended_to_the_url(self, mock_wait, mock_chrome, stockist):
+        mock_driver = Mock()
+        mock_driver.page_source = "<html></html>"
+        mock_chrome.return_value = mock_driver
+
+        stockist.scrape_with_selenium(
+            url="https://test.com/list", payload={"start": 0, "sz": 300}
+        )
+
+        mock_driver.get.assert_called_once_with("https://test.com/list?start=0&sz=300")
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_payload_joins_an_existing_query_string(
+        self, mock_wait, mock_chrome, stockist
+    ):
+        mock_driver = Mock()
+        mock_driver.page_source = "<html></html>"
+        mock_chrome.return_value = mock_driver
+
+        stockist.scrape_with_selenium(url="https://test.com/?q=a", payload={"p": 2})
+
+        mock_driver.get.assert_called_once_with("https://test.com/?q=a&p=2")
+
+    @pytest.mark.parametrize("payload", [None, {}])
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_no_payload_leaves_the_url_alone(
+        self, mock_wait, mock_chrome, stockist, payload
+    ):
+        mock_driver = Mock()
+        mock_driver.page_source = "<html></html>"
+        mock_chrome.return_value = mock_driver
+
+        stockist.scrape_with_selenium(url="https://test.com/#frag", payload=payload)
+
+        mock_driver.get.assert_called_once_with("https://test.com/#frag")
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_wait_for_selector_waits_a_second_time(
+        self, mock_wait, mock_chrome, stockist
+    ):
+        mock_driver = Mock()
+        mock_driver.page_source = "<html>ready</html>"
+        mock_chrome.return_value = mock_driver
+
+        result = stockist.scrape_with_selenium(
+            url="https://test.com", payload=None, wait_for=".item"
+        )
+
+        assert result == "<html>ready</html>"
+        # Once for the page load, once for the selector.
+        assert mock_wait.return_value.until.call_count == 2
+
+    @patch("stockist.stockist.webdriver.Chrome")
+    @patch("stockist.stockist.WebDriverWait")
+    def test_wait_for_selector_timeout_still_returns_page(
+        self, mock_wait, mock_chrome, stockist, caplog
+    ):
+        from selenium.common.exceptions import TimeoutException
+
+        mock_wait.return_value.until.side_effect = [None, TimeoutException("late")]
+        mock_driver = Mock()
+        mock_driver.page_source = "<html>partial</html>"
+        mock_chrome.return_value = mock_driver
+
+        with caplog.at_level("WARNING", logger="stockist.stockist"):
+            result = stockist.scrape_with_selenium(
+                url="https://test.com", payload=None, wait_for=".item"
+            )
+
+        assert result == "<html>partial</html>"
+        assert "Timed out waiting for '.item'" in caplog.text
+        mock_driver.quit.assert_called_once()
 
 
 class TestStockistUtils:
@@ -247,6 +339,71 @@ class TestStockistUtils:
         assert called_url == "https://test.com"
 
 
+class TestBuildUrl:
+    def test_appends_with_question_mark(self):
+        from stockist.utils import build_url
+
+        assert build_url("https://t.com/p", {"a": 1, "b": "x y"}) == (
+            "https://t.com/p?a=1&b=x+y"
+        )
+
+    def test_appends_with_ampersand_when_query_exists(self):
+        from stockist.utils import build_url
+
+        assert build_url("https://t.com/p?q=1", {"a": 1}) == "https://t.com/p?q=1&a=1"
+
+    @pytest.mark.parametrize("payload", [None, {}])
+    def test_no_payload_returns_url_unchanged(self, payload):
+        from stockist.utils import build_url
+
+        assert build_url("https://t.com/p#x", payload) == "https://t.com/p#x"
+
+
+class TestBlankResponse:
+    def test_content_is_empty_bytes(self):
+        from stockist.utils import BlankResponse
+
+        assert BlankResponse().content == b""
+        assert isinstance(BlankResponse().content, bytes)
+        # Parsers call .decode() on it, which must work.
+        assert BlankResponse().content.decode("utf-8") == ""
+
+    @patch("stockist.utils._get_session")
+    def test_failed_request_gives_empty_bytes(self, mock_session_fn):
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.Timeout
+        mock_session_fn.return_value = mock_session
+
+        assert send_public_request(url="https://test.com").content == b""
+
+
+class TestEmptyResponseHandling:
+    """Parsers report a failed request clearly instead of a decode error."""
+
+    @pytest.mark.parametrize(
+        "stockist_class,logger_name",
+        [
+            (NintendoUK, "stockist.nintendouk"),
+            (BestbuyCA, "stockist.bestbuyca"),
+            (CexUK, "stockist.cexuk"),
+        ],
+    )
+    def test_blank_response_logs_clear_error(self, stockist_class, logger_name, caplog):
+        from stockist.utils import BlankResponse
+
+        stockist = stockist_class(messengers=["test"])
+        with (
+            patch.object(stockist_class, "scrape", return_value=BlankResponse()),
+            caplog.at_level("ERROR", logger=logger_name),
+        ):
+            result = stockist.get_amiibo()
+
+        assert result == []
+        assert "request failed or returned nothing" in caplog.text
+        assert "decode" not in caplog.text
+        assert "Invalid JSON" not in caplog.text
+
+
 class TestStockistManager:
     """Test StockistManager class."""
 
@@ -323,17 +480,27 @@ class TestStockistManager:
             "bestbuy.com",
             "bestbuy.ca",
             "gamestop.com",
-            "game.co.uk",
-            "meccha-japan.com",
             "nintendo.co.uk",
             "play-asia.com",
             "shopto.net",
-            "thesource.ca",
             "uk.webuy.com",
         ]
 
         for stockist in expected_stockists:
             assert stockist in STOCKIST_FACTORY
+
+    @pytest.mark.parametrize(
+        "removed", ["game.co.uk", "meccha-japan.com", "thesource.ca"]
+    )
+    def test_removed_stockists_are_not_in_factory(self, removed):
+        assert removed not in STOCKIST_FACTORY
+
+    def test_factory_matches_config_enum_apart_from_removed(self):
+        from config.config import REMOVED_STOCKISTS
+        from config.config import Stockist as ConfigStockist
+
+        configurable = {s.value for s in ConfigStockist} - REMOVED_STOCKISTS
+        assert configurable == set(STOCKIST_FACTORY)
 
     def test_validate_stockists_success(self, mock_messengers):
         """Test _validate_stockists returns True when stockists exist."""
@@ -368,8 +535,6 @@ class TestStockistManager:
             "Gamestop US",
             "https://www.gamestop.com/consoles-hardware/nintendo-switch/nintendo-switch-amiibo",
         ),
-        (Game, "Game UK", "https://www.game.co.uk/en/amiibo/"),
-        (MecchaJapan, "Meccha Japan", "https://meccha-japan.com/en/367-amiibo?page="),
         (
             NintendoUK,
             "Nintendo UK",
@@ -378,14 +543,9 @@ class TestStockistManager:
         (
             PlayAsia,
             "Playasia",
-            "https://www.play-asia.com/games/amiibos/14/712od#fc=s:3,m:6,p:",
+            "https://www.play-asia.com/games/amiibos/14/712od",
         ),
         (Shopto, "Shopto", "https://www.shopto.net/en/search/?input_search=amiibo"),
-        (
-            TheSource,
-            "The Source",
-            "https://www.thesource.ca/en-ca/search?q=amiibo&page=",
-        ),
         (CexUK, "CeX UK", "https://wss2.cex.uk.webuy.io/v3/boxes"),
     ],
 )
@@ -708,6 +868,35 @@ class TestSessionRetryConfig:
         assert _get_session() is session
         assert "Content-Type" not in session.headers
         assert "User-Agent" in session.headers
+
+    def test_session_sends_browser_like_headers(self):
+        from stockist.utils import _get_session
+
+        session = _get_session()
+        assert "text/html" in session.headers["Accept"]
+        assert "application/json" in session.headers["Accept"]
+        assert session.headers["Accept-Language"] == "en-GB,en;q=0.9"
+
+    def test_user_agent_still_rotates_alongside_the_headers(self):
+        from constants import FALLBACK_USER_AGENTS
+        from stockist.utils import _get_session
+
+        for _ in range(5):
+            session = _get_session()
+            assert session.headers["User-Agent"] in FALLBACK_USER_AGENTS
+            assert session.headers["Accept-Language"] == "en-GB,en;q=0.9"
+
+    @patch("stockist.utils._get_session")
+    def test_request_timeout_can_be_overridden(self, mock_session_fn):
+        mock_session = Mock()
+        mock_session.get.return_value = Mock(status_code=200, content=b"ok")
+        mock_session_fn.return_value = mock_session
+
+        send_public_request(url="https://test.com", timeout=30)
+        assert mock_session.get.call_args.kwargs["timeout"] == 30
+
+        send_public_request(url="https://test.com")
+        assert mock_session.get.call_args.kwargs["timeout"] == REQUEST_TIMEOUT
 
     @patch("stockist.utils._get_session")
     def test_final_5xx_still_becomes_blank_response(self, mock_session_fn, caplog):

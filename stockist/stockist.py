@@ -7,13 +7,15 @@ import urllib3
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from constants import (
     FALLBACK_USER_AGENTS,
+    REQUEST_TIMEOUT,
     SELENIUM_WAIT_MAX,
 )
-from stockist.utils import send_public_request
+from stockist.utils import build_url, send_public_request
 
 log = logging.getLogger(__name__)
 
@@ -42,11 +44,26 @@ class Stockist:
 
     base_url: str | None = None
     name: str | None = None
+    # Seconds to wait for a response; a slow shop can override this.
+    request_timeout: float = REQUEST_TIMEOUT
 
     def scrape(self, url: str, payload: dict[str, Any] | None) -> Any:
-        return send_public_request(url=url, payload=payload)
+        return send_public_request(
+            url=url, payload=payload, timeout=self.request_timeout
+        )
 
-    def scrape_with_selenium(self, url: str, payload: dict[str, Any] | None) -> str:
+    def scrape_with_selenium(
+        self,
+        url: str,
+        payload: dict[str, Any] | None,
+        wait_for: str | None = None,
+    ) -> str:
+        """Load a page in headless Chrome and return its HTML.
+
+        `wait_for` is an optional CSS selector for pages that fill in their
+        content with JavaScript after loading. If it never appears, the page
+        is returned as it stands.
+        """
         driver = None
         try:
             options = Options()
@@ -60,10 +77,17 @@ class Stockist:
             driver.set_page_load_timeout(SELENIUM_WAIT_MAX)
             driver.set_script_timeout(SELENIUM_WAIT_MAX)
 
-            driver.get(url)
+            driver.get(build_url(url, payload))
             WebDriverWait(driver, SELENIUM_WAIT_MAX).until(
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
+            if wait_for:
+                try:
+                    WebDriverWait(driver, SELENIUM_WAIT_MAX).until(
+                        lambda d: d.find_elements(By.CSS_SELECTOR, wait_for)
+                    )
+                except TimeoutException:
+                    log.warning(f"Timed out waiting for {wait_for!r} on {url[:100]}")
             return driver.page_source
 
         except TimeoutException as e:

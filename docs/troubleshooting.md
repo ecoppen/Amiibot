@@ -19,7 +19,7 @@ Amiibot holds a lock on `.amiibot.lock` while it runs, and a second copy exits s
 You'll see `No items returned from <shop>` in the log, and the run exits with 2. Amiibot deliberately does nothing with an empty result, so you won't get false delisting alerts, but you also won't get alerts for that shop until it works again. Likely causes:
 
 - The shop changed its page layout and the scraper needs updating. If a shop has been empty for days, this is it, and an issue on GitHub is welcome.
-- The shop is blocking you or timing out. Requests give up after 5 seconds (`REQUEST_TIMEOUT` in `constants.py`), and a timeout or HTTP error is logged as a warning and counts as an empty result.
+- The shop is blocking you or timing out. Requests give up after 5 seconds (`REQUEST_TIMEOUT` in `constants.py`; Best Buy Canada is slow to answer, so it is given 30), and a timeout or HTTP error is logged as a warning and counts as an empty result.
 - It's a Selenium shop and Chrome isn't working (next section).
 
 ## "has failed 6 runs in a row" message
@@ -28,7 +28,7 @@ If a shop fails six runs in a row you get a message in your alert channel (see [
 
 ## Selenium or Chrome errors
 
-You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops (Best Buy, GameStop, GAME, ShopTo, The Source, Play-Asia and Meccha Japan, in some cases only as a fallback) need a real browser. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.
+You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops need a real browser: GameStop and Play-Asia always (they block plain HTTP requests), and Best Buy (US) and ShopTo only as a fallback when a plain request returns no products. Play-Asia opens a fresh browser for each of its pages, so it is the slowest shop. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.
 
 On a Raspberry Pi or other ARM Linux box that automatic download often doesn't work. Install the browser and driver from your distro instead, which is usually `chromium` and `chromium-driver` on Debian-based systems (the package names vary).
 

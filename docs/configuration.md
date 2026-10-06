@@ -45,7 +45,7 @@ You can keep the password out of the file with the `DATABASE_PASSWORD` environme
   "messenger_type": "discord",
   "webhook_url": "https://discord.com/api/webhooks/123456789/your-token",
   "active": true,
-  "stockists": ["nintendo.co.uk", "game.co.uk", "shopto.net"]
+  "stockists": ["nintendo.co.uk", "bestbuy.ca", "shopto.net"]
 }
 ```
 
@@ -110,15 +110,18 @@ An inactive messenger still counts when working out which shops to scrape, so a 
 | Best Buy | `bestbuy.com` | 🇺🇸 |
 | GameStop | `gamestop.com` | 🇺🇸 |
 | Best Buy Canada | `bestbuy.ca` | 🇨🇦 |
-| The Source | `thesource.ca` | 🇨🇦 |
 | Nintendo UK | `nintendo.co.uk` | 🇬🇧 |
-| GAME | `game.co.uk` | 🇬🇧 |
 | ShopTo | `shopto.net` | 🇬🇧 |
 | CeX | `uk.webuy.com` | 🇬🇧 |
-| Meccha Japan | `meccha-japan.com` | 🇯🇵 |
 | Play-Asia | `play-asia.com` | ships internationally |
 
-Adding a shop that isn't in this list means writing a scraper for it: subclass `Stockist` in `stockist/`, register it in `STOCKIST_FACTORY` in `stockist/manager.py`, and add its value to the `Stockist` enum in `config/config.py`.
+### Removed shops
+
+Three shops are no longer supported because they stopped working: GAME (`game.co.uk`, the amiibo page is gone), The Source (`thesource.ca`, the site has closed and redirects to Best Buy) and Meccha Japan (`meccha-japan.com`, it now puts an "I'm not a robot" check in front of every page). They are not scraped any more.
+
+If one of them is still in your `config.json` the config still loads. Amiibot ignores it and writes a warning such as "game.co.uk is no longer supported and is ignored; remove it from config.json" to the log. It's worth deleting the entry to silence the warning. If a messenger has nothing but removed shops in its list, the config is rejected with an error saying so, because that messenger would have nothing to watch.
+
+Adding a shop that isn't in the table means writing a scraper for it: subclass `Stockist` in `stockist/`, register it in `STOCKIST_FACTORY` in `stockist/manager.py`, and add its value to the `Stockist` enum in `config/config.py`.
 
 ## Environment variables
 

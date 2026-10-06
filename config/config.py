@@ -47,6 +47,47 @@ class Stockist(Enum):
     THESOURCE = "thesource.ca"
 
 
+# Shops that are no longer scraped. They stay in the Stockist enum so that an
+# existing config.json which still lists one keeps loading; the value is
+# dropped with a warning when the config is validated.
+REMOVED_STOCKISTS: frozenset[str] = frozenset(
+    {
+        Stockist.GAMEUK.value,
+        Stockist.MECCHAJAPAN.value,
+        Stockist.THESOURCE.value,
+    }
+)
+
+
+def _drop_removed_stockists(stockists: list, messenger: str) -> list:
+    """Drop removed stockists with a warning; require at least one to be left."""
+    if not stockists:
+        raise ValueError(
+            f"{messenger} messenger must have at least one stockist configured"
+        )
+
+    kept = []
+    removed = []
+    for stockist in stockists:
+        value = getattr(stockist, "value", stockist)
+        if value in REMOVED_STOCKISTS:
+            log.warning(
+                f"{value} is no longer supported and is ignored; "
+                "remove it from config.json"
+            )
+            removed.append(value)
+        else:
+            kept.append(stockist)
+
+    if not kept:
+        raise ValueError(
+            f"{messenger} messenger has no supported stockist left: "
+            f"{', '.join(removed)} {'is' if len(removed) == 1 else 'are'} "
+            "no longer supported. Add at least one supported stockist"
+        )
+    return kept
+
+
 def _redact(value: str) -> str:
     for pattern, replacement in REDACTION_PATTERNS:
         value = pattern.sub(replacement, value)
@@ -115,12 +156,8 @@ class DiscordMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
 
     @field_validator("stockists")
     @classmethod
-    def validate_stockists_not_empty(cls, v: list[Stockist]) -> list[Stockist]:
-        if not v:
-            raise ValueError(
-                "Discord messenger must have at least one stockist configured"
-            )
-        return v
+    def validate_stockists(cls, v: list[Stockist]) -> list[Stockist]:
+        return _drop_removed_stockists(v, "Discord")
 
     def resolve_secrets(self) -> None:
         if env_url := os.environ.get("DISCORD_WEBHOOK_URL"):
@@ -154,12 +191,8 @@ class TelegramMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
 
     @field_validator("stockists")
     @classmethod
-    def validate_stockists_not_empty(cls, v: list[Stockist]) -> list[Stockist]:
-        if not v:
-            raise ValueError(
-                "Telegram messenger must have at least one stockist configured"
-            )
-        return v
+    def validate_stockists(cls, v: list[Stockist]) -> list[Stockist]:
+        return _drop_removed_stockists(v, "Telegram")
 
     def resolve_secrets(self) -> None:
         if env_token := os.environ.get("TELEGRAM_BOT_TOKEN"):

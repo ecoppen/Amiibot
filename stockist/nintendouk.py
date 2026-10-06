@@ -57,6 +57,10 @@ class NintendoUK(Stockist):
         while not complete:
             response = self.scrape(url=self.base_url, payload=self.params)
 
+            if not response.content:
+                log.error(f"{self.name}: request failed or returned nothing")
+                break
+
             try:
                 cards = json.loads(response.content.decode("utf-8"))
             except json.JSONDecodeError as exc:

@@ -32,7 +32,7 @@ The example's webhook URL is a placeholder and will fail validation, so you have
       "messenger_type": "discord",
       "webhook_url": "https://discord.com/api/webhooks/123456789/your-token",
       "active": true,
-      "stockists": ["nintendo.co.uk", "game.co.uk"]
+      "stockists": ["nintendo.co.uk", "shopto.net"]
     }
   }
 }

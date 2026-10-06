@@ -13,11 +13,13 @@ The first run against a shop alerts on every product it finds, in stock or not. 
 
 ## Pre-orders
 
-A pre-order is a product you can order before it is released. It gets its own "Pre-order" status, with an orange embed, so it isn't mistaken for a restock. Only Nintendo UK reports pre-orders. Other shops don't tell Amiibot the difference, so a pre-order there will look like any other status.
+A pre-order is a product you can order before it is released. It gets its own "Pre-order" status, with an orange embed, so it isn't mistaken for a restock. Nintendo UK, Best Buy Canada, GameStop and Play-Asia report pre-orders. Best Buy (US), ShopTo and CeX don't tell Amiibot the difference, so a pre-order there will look like any other status.
 
-When the shop gives a release date that is today or later, the alert has an extra "Release" field, for example "12 Nov 2026". The date is only shown in the alert. It is not remembered between runs, and a changed release date on its own doesn't trigger a new alert.
+When the shop gives a release date that is today or later, the alert has an extra "Release" field, for example "12 Nov 2026". Nintendo UK, Best Buy Canada and GameStop give release dates; Play-Asia doesn't. The date is only shown in the alert. It is not remembered between runs, and a changed release date on its own doesn't trigger a new alert.
 
 If Nintendo UK reports a status Amiibot doesn't recognise, it is treated as out of stock and a warning is written to the log.
+
+A pre-order that has sold out is reported as out of stock, and keeps its release date. Best Buy Canada's search results don't say what is in stock, so Amiibot makes a second request to its availability service. If that request fails, the run still works but treats every listed item as in stock (or on pre-order), and a warning is written to the log.
 
 ## Delisting
 

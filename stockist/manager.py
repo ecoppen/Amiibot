@@ -4,13 +4,10 @@ from typing import Any
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
-from stockist.game import Game
 from stockist.gamestop import Gamestop
-from stockist.mecchajapan import MecchaJapan
 from stockist.nintendouk import NintendoUK
 from stockist.playasia import PlayAsia
 from stockist.shopto import Shopto
-from stockist.thesource import TheSource
 
 log = logging.getLogger(__name__)
 
@@ -19,12 +16,9 @@ STOCKIST_FACTORY = {
     "bestbuy.com": Bestbuy,
     "bestbuy.ca": BestbuyCA,
     "gamestop.com": Gamestop,
-    "game.co.uk": Game,
-    "meccha-japan.com": MecchaJapan,
     "nintendo.co.uk": NintendoUK,
     "play-asia.com": PlayAsia,
     "shopto.net": Shopto,
-    "thesource.ca": TheSource,
     "uk.webuy.com": CexUK,
 }
 

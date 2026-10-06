@@ -342,3 +342,107 @@ class TestDiscordMention:
             assert config.messengers["d"].mention == "<@&42>"
         finally:
             temp_path.unlink()
+
+
+REMOVED_SHOPS = ["game.co.uk", "thesource.ca", "meccha-japan.com"]
+
+
+class TestRemovedStockists:
+    """Shops that are no longer scraped stay loadable but are ignored."""
+
+    TELEGRAM_TOKEN = "123456789:" + "A" * 35
+
+    @classmethod
+    def _messenger(cls, kind, stockists):
+        if kind == "discord":
+            return {
+                "messenger_type": "discord",
+                "webhook_url": "https://discord.com/api/webhooks/123/abc",
+                "active": True,
+                "stockists": stockists,
+            }
+        return {
+            "messenger_type": "telegram",
+            "bot_token": cls.TELEGRAM_TOKEN,
+            "chat_id": "42",
+            "active": True,
+            "stockists": stockists,
+        }
+
+    @staticmethod
+    def _load(messengers):
+        data = {
+            "database": {"engine": "sqlite", "name": "test_db"},
+            "messengers": messengers,
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            temp_path = Path(f.name)
+        try:
+            return load_config(temp_path)
+        finally:
+            temp_path.unlink()
+
+    def test_removed_values_stay_in_the_enum(self):
+        from config.config import REMOVED_STOCKISTS, Stockist
+
+        values = {s.value for s in Stockist}
+        assert set(REMOVED_SHOPS) == set(REMOVED_STOCKISTS)
+        assert set(REMOVED_SHOPS) <= values
+
+    @pytest.mark.parametrize("kind", ["discord", "telegram"])
+    @pytest.mark.parametrize("removed", REMOVED_SHOPS)
+    def test_removed_stockist_is_dropped_with_a_warning(self, kind, removed, caplog):
+        with caplog.at_level("WARNING", logger="config.config"):
+            config = self._load(
+                {"m": self._messenger(kind, ["nintendo.co.uk", removed])}
+            )
+
+        assert config.messengers["m"].stockists == ["nintendo.co.uk"]
+        assert (
+            f"{removed} is no longer supported and is ignored; "
+            "remove it from config.json"
+        ) in caplog.text
+
+    def test_all_removed_values_are_dropped_and_each_is_reported(self, caplog):
+        with caplog.at_level("WARNING", logger="config.config"):
+            config = self._load(
+                {"m": self._messenger("discord", ["shopto.net", *REMOVED_SHOPS])}
+            )
+
+        assert config.messengers["m"].stockists == ["shopto.net"]
+        for removed in REMOVED_SHOPS:
+            assert f"{removed} is no longer supported" in caplog.text
+
+    @pytest.mark.parametrize("kind", ["discord", "telegram"])
+    def test_only_removed_stockists_is_a_clear_error(self, kind):
+        with pytest.raises(ValueError) as exc:
+            self._load({"m": self._messenger(kind, ["game.co.uk", "thesource.ca"])})
+
+        message = str(exc.value)
+        assert "no supported stockist left" in message
+        assert "game.co.uk, thesource.ca are no longer supported" in message
+
+    def test_single_removed_stockist_error_reads_correctly(self):
+        with pytest.raises(
+            ValueError, match=r"meccha-japan.com is no longer supported"
+        ):
+            self._load({"m": self._messenger("discord", ["meccha-japan.com"])})
+
+    @pytest.mark.parametrize("kind", ["discord", "telegram"])
+    def test_empty_list_still_gives_the_original_error(self, kind):
+        with pytest.raises(ValueError, match="at least one stockist"):
+            self._load({"m": self._messenger(kind, [])})
+
+    def test_supported_stockists_are_untouched_and_quiet(self, caplog):
+        with caplog.at_level("WARNING", logger="config.config"):
+            config = self._load(
+                {"m": self._messenger("discord", ["bestbuy.com", "play-asia.com"])}
+            )
+
+        assert config.messengers["m"].stockists == ["bestbuy.com", "play-asia.com"]
+        assert "no longer supported" not in caplog.text
+
+    def test_unknown_stockist_is_still_rejected(self):
+        with pytest.raises(ValueError, match="Configuration validation failed"):
+            self._load({"m": self._messenger("discord", ["not-a-shop.com"])})

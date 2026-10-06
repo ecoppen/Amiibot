@@ -1,5 +1,6 @@
 import logging
 import secrets
+from typing import Any
 from urllib.parse import urlencode
 
 import requests  # type: ignore
@@ -16,6 +17,16 @@ _session: requests.Session | None = None
 RETRY_TOTAL = 2
 RETRY_BACKOFF_FACTOR = 1
 RETRY_STATUS_FORCELIST = (429, 500, 502, 503, 504)
+
+# Browser-like defaults. Some shops (bestbuy.ca, for one) stall requests that
+# do not look like they come from a browser.
+DEFAULT_HEADERS = {
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "application/json;q=0.9,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+}
 
 
 def _build_retry() -> Retry:
@@ -34,6 +45,7 @@ def _get_session() -> requests.Session:
     global _session
     if _session is None:
         _session = requests.Session()
+        _session.headers.update(DEFAULT_HEADERS)
         adapter = HTTPAdapter(max_retries=_build_retry())
         _session.mount("https://", adapter)
         _session.mount("http://", adapter)
@@ -42,20 +54,27 @@ def _get_session() -> requests.Session:
 
 
 class BlankResponse:
+    """Stand-in returned when a request fails; its body is empty bytes."""
+
     def __init__(self):
-        self.content = ""
+        self.content = b""
 
 
-def send_public_request(url, payload=None):
+def build_url(url: str, payload: dict[str, Any] | None = None) -> str:
+    """Append a urlencoded payload to a URL as a query string."""
+    query_string = urlencode(payload or {}, True)
+    if not query_string:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{query_string}"
+
+
+def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
     empty_response = BlankResponse()
-    if payload is None:
-        payload = {}
-    query_string = urlencode(payload, True)
-    if query_string:
-        url = url + "?" + query_string
+    url = build_url(url, payload)
 
     try:
-        response = _get_session().get(url=url, timeout=REQUEST_TIMEOUT)
+        response = _get_session().get(url=url, timeout=timeout)
         response.raise_for_status()
         return response
     except requests.exceptions.Timeout:
