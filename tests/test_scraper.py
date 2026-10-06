@@ -38,6 +38,7 @@ class TestScraper:
         db.record_scraping_failure.return_value = 1
         db.record_scraping_success.return_value = None
         db.get_consecutive_failures.return_value = 0
+        db.get_failure_alert_state.return_value = (0, None)
         db.get_last_healthy_count.return_value = 100
         db.record_scrape_attempt.return_value = None
         db.record_healthy_scrape.return_value = None
@@ -891,3 +892,213 @@ class TestScraperOutboxDelivery:
         assert [r.status for r in self._rows(database) if r.website == "other.com"] == [
             "pending"
         ]
+
+
+class TestStockistFailureAlerts:
+    """Failure and recovery messages, against a real SQLite database."""
+
+    @pytest.fixture(autouse=True)
+    def no_sleep(self):
+        with patch("time.sleep"):
+            yield
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        from config.config import DatabaseConfig
+        from database import Database
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_failures_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _messenger(name="m1", status=OK):
+        m = Mock()
+        m.name = name
+        m.send_message.return_value = _result(status, 200, name)
+        m.send_embed_message.return_value = _result(OK, 200, name)
+        return m
+
+    @staticmethod
+    def _build(database, messengers, holder, stockist_messengers=None):
+        stockist = Mock()
+        stockist.name = "Nintendo UK"
+        stockist.messengers = stockist_messengers or [m.name for m in messengers]
+
+        def get_amiibo():
+            if holder["mode"] == "raise":
+                raise RuntimeError("boom\nline two")
+            if holder["mode"] == "empty":
+                return []
+            return [_scrape_item()]
+
+        stockist.get_amiibo.side_effect = get_amiibo
+        stockists = Mock()
+        stockists.all_stockists = [stockist]
+        stockists.messengers = Mock()
+        stockists.messengers.all_messengers = messengers
+        return Scraper(config=Mock(), stockists=stockists, database=database)
+
+    @staticmethod
+    def _run(scraper, times):
+        for _ in range(times):
+            scraper.scrape_cycle()
+
+    def test_threshold_boundary_and_no_repeat(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+
+        self._run(scraper, 5)
+        m.send_message.assert_not_called()
+
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 1
+        message = m.send_message.call_args[0][0]
+        assert message.startswith("Amiibot: Nintendo UK has failed 6 runs in a row")
+        assert "boom line two" in message
+        assert "paused until it recovers" in message
+        assert database.get_failure_alert_state("Nintendo UK")[1] is not None
+
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 1
+
+    def test_empty_result_uses_returned_no_items(self, database):
+        m = self._messenger()
+        scraper = self._build(database, [m], {"mode": "empty"})
+        self._run(scraper, 6)
+        assert "(last error: returned no items)" in m.send_message.call_args[0][0]
+
+    def test_failed_send_retries_next_run(self, database):
+        m = self._messenger(status=DeliveryStatus.TRANSIENT_FAILURE)
+        scraper = self._build(database, [m], {"mode": "raise"})
+
+        self._run(scraper, 6)
+        assert m.send_message.call_count == 1
+        assert database.get_failure_alert_state("Nintendo UK")[1] is None
+
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 2
+
+        m.send_message.return_value = _result(OK, 200, "m1")
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 3
+        assert database.get_failure_alert_state("Nintendo UK")[1] is not None
+
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 3
+
+    def test_inactive_messenger_leaves_alert_unsent(self, database):
+        m = self._messenger(status=DeliveryStatus.INACTIVE)
+        scraper = self._build(database, [m], {"mode": "raise"})
+        self._run(scraper, 6)
+        assert database.get_failure_alert_state("Nintendo UK")[1] is None
+
+    def test_one_successful_messenger_is_enough(self, database):
+        bad = self._messenger("bad", DeliveryStatus.PERMANENT_FAILURE)
+        good = self._messenger("good")
+        scraper = self._build(database, [bad, good], {"mode": "raise"})
+        self._run(scraper, 6)
+        bad.send_message.assert_called_once()
+        good.send_message.assert_called_once()
+        assert database.get_failure_alert_state("Nintendo UK")[1] is not None
+
+    def test_only_stockist_messengers_receive_messages(self, database):
+        mine = self._messenger("mine")
+        other = self._messenger("other")
+        scraper = self._build(
+            database, [mine, other], {"mode": "raise"}, stockist_messengers=["mine"]
+        )
+        self._run(scraper, 6)
+        mine.send_message.assert_called_once()
+        other.send_message.assert_not_called()
+
+    def test_recovery_sent_once_and_flag_cleared(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        self._run(scraper, 7)
+        assert m.send_message.call_count == 1
+
+        holder["mode"] = "ok"
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 2
+        assert m.send_message.call_args[0][0] == (
+            "Amiibot: Nintendo UK is working again after 7 failed runs."
+        )
+        assert database.get_failure_alert_state("Nintendo UK") == (0, None)
+
+        self._run(scraper, 2)
+        assert m.send_message.call_count == 2
+
+    def test_no_recovery_message_if_no_alert_was_sent(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        self._run(scraper, 5)
+        holder["mode"] = "ok"
+        self._run(scraper, 1)
+        m.send_message.assert_not_called()
+
+    def test_flag_cleared_even_if_recovery_send_fails(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        self._run(scraper, 6)
+        m.send_message.return_value = _result(DeliveryStatus.TRANSIENT_FAILURE, 500)
+        holder["mode"] = "ok"
+        self._run(scraper, 2)
+        assert m.send_message.call_count == 2
+        assert database.get_failure_alert_state("Nintendo UK") == (0, None)
+
+    def test_new_streak_alerts_again_after_recovery(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        self._run(scraper, 6)
+        holder["mode"] = "ok"
+        self._run(scraper, 1)
+        holder["mode"] = "raise"
+        self._run(scraper, 6)
+        texts = [c[0][0] for c in m.send_message.call_args_list]
+        assert len(texts) == 3
+        assert "failed 6 runs" in texts[0]
+        assert "working again" in texts[1]
+        assert "failed 6 runs" in texts[2]
+
+    def test_messenger_exception_cannot_break_cycle(self, database):
+        m = self._messenger()
+        m.send_message.side_effect = RuntimeError("discord exploded")
+        scraper = self._build(database, [m], {"mode": "raise"})
+        self._run(scraper, 5)
+        result = scraper.scrape_cycle()
+        assert result.failed == 1
+        assert database.get_failure_alert_state("Nintendo UK")[1] is None
+
+    def test_database_error_cannot_break_cycle(self, database):
+        m = self._messenger()
+        scraper = self._build(database, [m], {"mode": "raise"})
+        with patch.object(
+            database, "get_failure_alert_state", side_effect=RuntimeError("db down")
+        ):
+            result = scraper.scrape_cycle()
+        assert result.failed == 1
+
+    def test_long_error_is_truncated(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        scraper.stockists.all_stockists[0].get_amiibo.side_effect = RuntimeError(
+            "x" * 5000
+        )
+        self._run(scraper, 6)
+        assert len(m.send_message.call_args[0][0]) < 400

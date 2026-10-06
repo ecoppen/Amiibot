@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,7 +16,7 @@ from constants import (
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
 from result import DeliveryStatus
-from stockist.stockist import Stock
+from stockist.stockist import URGENT_STATUSES, Stock
 
 log = logging.getLogger(__name__)
 
@@ -36,10 +37,10 @@ _OUTBOX_MIGRATION_COLUMNS: list[tuple[str, str]] = [
     ("release_date", "VARCHAR"),
 ]
 
-# Stock statuses that always notify, bypassing the repeat-alert cooldown.
-URGENT_STATUSES: frozenset[str] = frozenset(
-    {Stock.IN_STOCK.value, Stock.PRE_ORDER.value}
-)
+# Columns added to scraping_failures after its original creation.
+_SCRAPING_FAILURE_MIGRATION_COLUMNS: list[tuple[str, str]] = [
+    ("alert_sent_at", "TIMESTAMP"),
+]
 
 
 class Base(DeclarativeBase):
@@ -120,6 +121,15 @@ class ScrapingFailure(Base):
     consecutive_failures: Mapped[int] = mapped_column(default=0)
     last_failure: Mapped[datetime] = mapped_column(default=datetime.now)
     last_success: Mapped[datetime | None] = mapped_column(nullable=True)
+    alert_sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+@dataclass(frozen=True)
+class ScrapingRecovery:
+    """What a successful scrape replaced: the failure streak and its alert."""
+
+    previous_failures: int = 0
+    alert_sent: bool = False
 
 
 class Database:
@@ -239,6 +249,10 @@ class Database:
                     )
                 result = conn.execute(db.text("PRAGMA table_info(notification_outbox)"))
                 self._add_missing_outbox_columns(conn, [row[1] for row in result])
+                result = conn.execute(db.text("PRAGMA table_info(scraping_failures)"))
+                self._add_missing_scraping_failure_columns(
+                    conn, [row[1] for row in result]
+                )
                 conn.commit()
         elif self._engine_type == "postgres":
             with self.engine.connect() as conn:
@@ -334,6 +348,14 @@ class Database:
                     )
                 )
                 self._add_missing_outbox_columns(conn, [row[0] for row in result])
+                result = conn.execute(
+                    db.text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'scraping_failures'"
+                    )
+                )
+                self._add_missing_scraping_failure_columns(
+                    conn, [row[0] for row in result]
+                )
                 conn.commit()
 
     @staticmethod
@@ -345,6 +367,19 @@ class Database:
             if name not in existing_cols:
                 conn.execute(
                     db.text(f"ALTER TABLE notification_outbox ADD COLUMN {name} {ddl}")
+                )
+
+    @staticmethod
+    def _add_missing_scraping_failure_columns(
+        conn: Any, existing_cols: list[str]
+    ) -> None:
+        """Add columns introduced after scraping_failures was first created."""
+        if not existing_cols:
+            return
+        for name, ddl in _SCRAPING_FAILURE_MIGRATION_COLUMNS:
+            if name not in existing_cols:
+                conn.execute(
+                    db.text(f"ALTER TABLE scraping_failures ADD COLUMN {name} {ddl}")
                 )
 
     def remove_currency(self, currency_string: str) -> float:
@@ -498,23 +533,65 @@ class Database:
         log.warning(f"{stockist} has {count} consecutive scraping failure(s)")
         return count
 
-    def record_scraping_success(self, stockist: str) -> None:
+    def record_scraping_success(self, stockist: str) -> ScrapingRecovery:
         """Record a successful scrape, resetting failure count.
+
+        The failure alert flag is left alone so the caller can send a recovery
+        message and then call clear_failure_alert.
 
         Args:
             stockist: Name of the stockist that succeeded
+
+        Returns:
+            The failure streak that was just reset and whether it had been alerted
         """
         with self.Session() as session:
             failure = (
                 session.query(ScrapingFailure).filter_by(stockist=stockist).first()
             )
+            if failure is None:
+                return ScrapingRecovery()
+            recovery = ScrapingRecovery(
+                previous_failures=failure.consecutive_failures,
+                alert_sent=failure.alert_sent_at is not None,
+            )
+            if failure.consecutive_failures > 0:
+                log.info(
+                    f"{stockist} scraping recovered after {failure.consecutive_failures} failure(s)"
+                )
+            failure.consecutive_failures = 0
+            failure.last_success = datetime.now()
+            session.commit()
+            return recovery
+
+    def get_failure_alert_state(self, stockist: str) -> tuple[int, datetime | None]:
+        """Return (consecutive failures, when the failure alert was sent or None)."""
+        with self.Session() as session:
+            failure = (
+                session.query(ScrapingFailure).filter_by(stockist=stockist).first()
+            )
+            if failure is None:
+                return 0, None
+            return failure.consecutive_failures, failure.alert_sent_at
+
+    def mark_failure_alert_sent(self, stockist: str) -> None:
+        """Remember that the "stockist keeps failing" alert has been delivered."""
+        with self.Session() as session:
+            failure = (
+                session.query(ScrapingFailure).filter_by(stockist=stockist).first()
+            )
             if failure is not None:
-                if failure.consecutive_failures > 0:
-                    log.info(
-                        f"{stockist} scraping recovered after {failure.consecutive_failures} failure(s)"
-                    )
-                failure.consecutive_failures = 0
-                failure.last_success = datetime.now()
+                failure.alert_sent_at = datetime.now()
+                session.commit()
+
+    def clear_failure_alert(self, stockist: str) -> None:
+        """Forget the failure alert so a future failure streak can alert again."""
+        with self.Session() as session:
+            failure = (
+                session.query(ScrapingFailure).filter_by(stockist=stockist).first()
+            )
+            if failure is not None and failure.alert_sent_at is not None:
+                failure.alert_sent_at = None
                 session.commit()
 
     def get_consecutive_failures(self, stockist: str) -> int:

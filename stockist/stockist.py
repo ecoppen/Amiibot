@@ -27,6 +27,13 @@ class Stock(Enum):
     PRE_ORDER = "Pre-order"
 
 
+# Stock statuses that always notify, bypassing the repeat-alert cooldown, and
+# that ping the configured Discord mention.
+URGENT_STATUSES: frozenset[str] = frozenset(
+    {Stock.IN_STOCK.value, Stock.PRE_ORDER.value}
+)
+
+
 class Stockist:
     def __init__(self, messengers: list[str]) -> None:
         self.params: dict[str, Any] = {}

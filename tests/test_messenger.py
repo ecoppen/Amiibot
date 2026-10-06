@@ -314,6 +314,125 @@ class TestDiscord:
         assert result.status == DeliveryStatus.INACTIVE
 
 
+class TestDiscordPayloads:
+    """Payload content and allowed_mentions."""
+
+    ITEM = {
+        "Title": "Test",
+        "Colour": 0x00FF00,
+        "URL": "https://test.com",
+        "Image": "https://test.com/img.jpg",
+        "Price": "$5.00",
+        "Stock": "In stock",
+        "Website": "test.com",
+    }
+
+    @staticmethod
+    def _discord(mention=None):
+        return Discord(
+            name="d",
+            stockists=["test.com"],
+            active=True,
+            webhook_url="https://discord.com/api/webhooks/123/abc",
+            mention=mention,
+        )
+
+    @staticmethod
+    def _ok():
+        return DeliveryResult(
+            status=DeliveryStatus.SUCCESS, messenger_name="d", http_status=200
+        )
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_send_message_after_embed_does_not_resend_embeds(self, mock_post):
+        mock_post.return_value = self._ok()
+        discord = self._discord()
+
+        discord.send_embed_message(self.ITEM)
+        assert "embeds" in mock_post.call_args.kwargs["json"]
+
+        discord.send_message("plain")
+        sent = mock_post.call_args.kwargs["json"]
+        assert "embeds" not in sent
+        assert sent["content"] == "plain"
+        assert sent["username"] == "Amiibot"
+        assert "avatar_url" in sent
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_payloads_are_independent_per_call(self, mock_post):
+        mock_post.return_value = self._ok()
+        discord = self._discord("@here")
+
+        discord.send_embed_message(self.ITEM)
+        first = mock_post.call_args.kwargs["json"]
+        discord.send_embed_message({**self.ITEM, "Stock": "Out of Stock"})
+        second = mock_post.call_args.kwargs["json"]
+
+        assert first is not second
+        assert first["content"] == "@here Stock alert"
+        assert second["content"] == "Stock alert"
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_plain_message_blocks_all_mentions(self, mock_post):
+        mock_post.return_value = self._ok()
+        self._discord("@everyone").send_message("Amiibot: failing")
+        sent = mock_post.call_args.kwargs["json"]
+        assert sent["content"] == "Amiibot: failing"
+        assert sent["allowed_mentions"] == {"parse": []}
+
+    @pytest.mark.parametrize(
+        "mention, allowed",
+        [
+            ("<@&123456789>", {"roles": ["123456789"]}),
+            ("<@987654321>", {"users": ["987654321"]}),
+            ("@here", {"parse": ["everyone"]}),
+            ("@everyone", {"parse": ["everyone"]}),
+        ],
+    )
+    @pytest.mark.parametrize("stock", ["In stock", "Pre-order"])
+    @patch("messenger.discord.Discord.send_post")
+    def test_urgent_alert_mentions(self, mock_post, stock, mention, allowed):
+        mock_post.return_value = self._ok()
+        self._discord(mention).send_embed_message({**self.ITEM, "Stock": stock})
+        sent = mock_post.call_args.kwargs["json"]
+        assert sent["content"] == f"{mention} Stock alert"
+        assert sent["allowed_mentions"] == allowed
+
+    @pytest.mark.parametrize("stock", ["Out of Stock", "Price change", "Delisted"])
+    @patch("messenger.discord.Discord.send_post")
+    def test_non_urgent_alert_does_not_mention(self, mock_post, stock):
+        mock_post.return_value = self._ok()
+        self._discord("<@&123>").send_embed_message({**self.ITEM, "Stock": stock})
+        sent = mock_post.call_args.kwargs["json"]
+        assert sent["content"] == "Stock alert"
+        assert sent["allowed_mentions"] == {"parse": []}
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_no_mention_configured(self, mock_post):
+        mock_post.return_value = self._ok()
+        self._discord().send_embed_message(self.ITEM)
+        sent = mock_post.call_args.kwargs["json"]
+        assert sent["content"] == "Stock alert"
+        assert sent["allowed_mentions"] == {"parse": []}
+
+    def test_role_allowed_mentions_never_combines_parse_and_roles(self):
+        allowed = self._discord("<@&123>")._allowed_mentions()
+        assert "parse" not in allowed
+
+    def test_manager_passes_mention_through(self):
+        config = {
+            "d": Mock(
+                messenger_type="discord",
+                stockists=["test.com"],
+                webhook_url="https://discord.com/api/webhooks/123/abc",
+                active=True,
+                mention="<@&42>",
+            )
+        }
+        manager = MessageManager(config)
+        assert manager.all_messengers[0].mention == "<@&42>"
+
+
 class TestTelegram:
     @pytest.fixture
     def telegram_messenger(self):

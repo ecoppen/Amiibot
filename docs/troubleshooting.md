@@ -22,6 +22,10 @@ You'll see `No items returned from <shop>` in the log, and the run exits with 2.
 - The shop is blocking you or timing out. Requests give up after 5 seconds (`REQUEST_TIMEOUT` in `constants.py`), and a timeout or HTTP error is logged as a warning and counts as an empty result.
 - It's a Selenium shop and Chrome isn't working (next section).
 
+## "has failed 6 runs in a row" message
+
+If a shop fails six runs in a row you get a message in your alert channel (see [How alerts work](alerts.md#when-a-shop-keeps-failing)). A single failed run is usually a blip, but six in a row, about an hour, usually means the scraper needs updating because the shop changed its page or API. Check `log.txt` for the error, and open an issue on GitHub if it keeps happening. You'll get a second message when the shop starts working again.
+
 ## Selenium or Chrome errors
 
 You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops (Best Buy, GameStop, GAME, ShopTo, The Source, Play-Asia and Meccha Japan, in some cases only as a fallback) need a real browser. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.

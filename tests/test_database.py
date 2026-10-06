@@ -810,7 +810,7 @@ class TestOutboxChangeDetection:
         assert database.check_then_add_or_update_amiibo([_datum(**oos)]) == []
 
     def test_urgent_statuses(self):
-        from database import URGENT_STATUSES
+        from stockist.stockist import URGENT_STATUSES
 
         assert URGENT_STATUSES == {"In stock", "Pre-order"}
 
@@ -1219,3 +1219,114 @@ class TestOutboxMigration:
         database.check_then_add_or_update_amiibo([_datum()])
         assert len(database.get_pending_outbox("t.com")) == 1
         assert len(database.get_pending_outbox("w")) == 1
+
+
+class TestFailureAlertState:
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_failalert_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    def test_unknown_stockist_state(self, database):
+        assert database.get_failure_alert_state("x") == (0, None)
+        database.mark_failure_alert_sent("x")
+        database.clear_failure_alert("x")
+
+    def test_success_with_no_history(self, database):
+        from database import ScrapingRecovery
+
+        assert database.record_scraping_success("x") == ScrapingRecovery(0, False)
+
+    def test_alert_flag_lifecycle(self, database):
+        for _ in range(3):
+            database.record_scraping_failure("x")
+        count, sent = database.get_failure_alert_state("x")
+        assert (count, sent) == (3, None)
+
+        database.mark_failure_alert_sent("x")
+        count, sent = database.get_failure_alert_state("x")
+        assert count == 3 and sent is not None
+
+        recovery = database.record_scraping_success("x")
+        assert recovery.previous_failures == 3
+        assert recovery.alert_sent is True
+        # The flag survives until the caller clears it.
+        assert database.get_failure_alert_state("x") == (0, sent)
+
+        database.clear_failure_alert("x")
+        assert database.get_failure_alert_state("x") == (0, None)
+
+    def test_success_without_alert_reports_no_alert(self, database):
+        database.record_scraping_failure("x")
+        recovery = database.record_scraping_success("x")
+        assert recovery.previous_failures == 1
+        assert recovery.alert_sent is False
+
+
+class TestScrapingFailureMigration:
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        import sqlalchemy as sa
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_sf_mig_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        with db.engine.begin() as conn:
+            conn.execute(sa.text("DROP TABLE scraping_failures"))
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE scraping_failures ("
+                    "stockist VARCHAR NOT NULL PRIMARY KEY, "
+                    "consecutive_failures INTEGER NOT NULL, "
+                    "last_failure DATETIME NOT NULL, last_success DATETIME)"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO scraping_failures VALUES "
+                    "('w', 4, '2026-01-01 00:00:00', NULL)"
+                )
+            )
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    def _columns(self, database):
+        import sqlalchemy as sa
+
+        with database.engine.connect() as conn:
+            return {
+                row[1]
+                for row in conn.execute(sa.text("PRAGMA table_info(scraping_failures)"))
+            }
+
+    def test_adds_alert_sent_at_and_is_idempotent(self, database):
+        assert "alert_sent_at" not in self._columns(database)
+        database._run_migrations()
+        assert "alert_sent_at" in self._columns(database)
+        database._run_migrations()
+        assert "alert_sent_at" in self._columns(database)
+        assert database.get_failure_alert_state("w") == (4, None)
+
+    def test_helper_skips_missing_table(self):
+        from unittest.mock import Mock
+
+        conn = Mock()
+        Database._add_missing_scraping_failure_columns(conn, [])
+        conn.execute.assert_not_called()

@@ -82,6 +82,10 @@ MIN_ITEMS_THRESHOLD = 1
 SCRAPING_FAILURE_GRACE_PERIOD = 2
 """Number of consecutive misses before declaring an item as genuinely delisted."""
 
+STOCKIST_FAILURE_ALERT_THRESHOLD = 6
+"""Consecutive failed runs before a "stockist keeps failing" message is sent
+   (about an hour at the documented 10-minute schedule)."""
+
 STOCKIST_HEALTH_RATIO = 0.5
 """If current scraped item count is less than this ratio of the previous count,
    the stockist is considered unhealthy and delisting is skipped for that run."""

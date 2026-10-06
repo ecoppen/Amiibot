@@ -268,3 +268,75 @@ class TestConfiguration:
 
         assert Databases.SQLITE.value == "sqlite"
         assert Databases.POSTGRES.value == "postgres"
+
+
+class TestDiscordMention:
+    """Validation of the optional Discord mention."""
+
+    @staticmethod
+    def _config(**extra):
+        from config.config import DiscordMessengerConfig
+
+        return DiscordMessengerConfig(
+            messenger_type="discord",
+            webhook_url="https://discord.com/api/webhooks/123/abc",
+            stockists=["nintendo.co.uk"],
+            **extra,
+        )
+
+    def test_default_is_none(self):
+        assert self._config().mention is None
+
+    @pytest.mark.parametrize(
+        "value",
+        ["@here", "@everyone", "<@&123456789012345678>", "<@123456789012345678>"],
+    )
+    def test_valid_mentions(self, value):
+        assert self._config(mention=value).mention == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            "here",
+            "@Here",
+            "@role",
+            "<@&abc>",
+            "<@&>",
+            "<@>",
+            "<@!123>",
+            "<#123>",
+            "123456",
+            "<@&123> <@&456>",
+            "<@&123>\n",
+            " @here",
+        ],
+    )
+    def test_invalid_mentions(self, value):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc:
+            self._config(mention=value)
+        assert "mention must be" in str(exc.value)
+
+    def test_mention_loads_from_file(self):
+        config_data = {
+            "database": {"engine": "sqlite", "name": "test_db"},
+            "messengers": {
+                "d": {
+                    "messenger_type": "discord",
+                    "webhook_url": "https://discord.com/api/webhooks/123/abc",
+                    "active": True,
+                    "stockists": ["bestbuy.com"],
+                    "mention": "<@&42>",
+                }
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config_data, f)
+            temp_path = Path(f.name)
+        try:
+            config = load_config(temp_path)
+            assert config.messengers["d"].mention == "<@&42>"
+        finally:
+            temp_path.unlink()

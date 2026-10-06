@@ -25,6 +25,18 @@ A product only counts as delisted after it has been missing from `SCRAPING_FAILU
 
 Because a broken scrape can look exactly like a shop emptying its shelves, there are some guards. A scrape that returns nothing is treated as a failure, changes nothing in the database, and makes the run exit with code 2. A scrape that returns less than half of what that shop usually has (`STOCKIST_HEALTH_RATIO`) doesn't trigger any delistings. If it's low twice in a row (`CONSECUTIVE_UNHEALTHY_THRESHOLD`) the lower number becomes the new normal and delistings resume.
 
+## When a shop keeps failing
+
+Amiibot can also tell you when a shop has stopped working. If a shop fails `STOCKIST_FAILURE_ALERT_THRESHOLD` runs in a row (6 by default, about an hour at a 10-minute schedule), it sends a plain text message to that shop's messengers, along the lines of:
+
+> Amiibot: Nintendo UK has failed 6 runs in a row (last error: ...). Alerts for it are paused until it recovers.
+
+A failed run is one that raised an error or came back with nothing usable. If there was no error, the message says "returned no items". You only get this message once per streak. If no messenger manages to deliver it, for example because Discord is down, it is tried again on the next run.
+
+When the shop works again you get one more message, such as "Amiibot: Nintendo UK is working again after 7 failed runs." You only get it if the failure message was sent.
+
+These messages skip the outbox and the cooldown and never ping anyone. The recovery message is not retried if it fails to send. A problem sending either message is logged and the run carries on.
+
 ## Delivery
 
 Alerts aren't sent straight away. When a change is detected it's written to a `notification_outbox` table in the same database transaction as the change itself, so a crash can't leave you with a recorded change and no alert. At the end of each shop's scrape the pending alerts for that shop are sent.

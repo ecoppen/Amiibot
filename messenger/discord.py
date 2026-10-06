@@ -4,28 +4,52 @@ from typing import Any
 
 from messenger.messenger import Messenger
 from result import DeliveryResult, DeliveryStatus
+from stockist.stockist import URGENT_STATUSES
 
 log = logging.getLogger(__name__)
 
 
+AVATAR_URL = "https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png"
+
+
 class Discord(Messenger):
     def __init__(
-        self, name: str, stockists: list[str], active: bool, webhook_url: str
+        self,
+        name: str,
+        stockists: list[str],
+        active: bool,
+        webhook_url: str,
+        mention: str | None = None,
     ) -> None:
         super().__init__(name=name, stockists=stockists, active=active)
         self.webhook_url = webhook_url
-        self.data: dict[str, Any] = {
-            "username": "Amiibot",
-            "avatar_url": "https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png",
-        }
+        self.mention = mention
 
     messenger = "discord"
+
+    @staticmethod
+    def _new_payload(content: str) -> dict[str, Any]:
+        """Build a fresh webhook payload so nothing leaks between sends."""
+        return {
+            "username": "Amiibot",
+            "avatar_url": AVATAR_URL,
+            "content": content,
+            "allowed_mentions": {"parse": []},
+        }
+
+    def _allowed_mentions(self) -> dict[str, Any]:
+        """Allow exactly the configured mention to ping, and nothing else."""
+        mention = self.mention or ""
+        if mention.startswith("<@&"):
+            return {"roles": [mention[3:-1]]}
+        if mention.startswith("<@"):
+            return {"users": [mention[2:-1]]}
+        return {"parse": ["everyone"]}
 
     def send_message(self, message: str) -> DeliveryResult:
         if self.active:
             log.info(f"Sending discord message via {self.name}: {message}")
-            self.data["content"] = message
-            return self.send_post(url=self.webhook_url, json=self.data)
+            return self.send_post(url=self.webhook_url, json=self._new_payload(message))
         return self._build_delivery_result(DeliveryStatus.INACTIVE)
 
     def send_embed_message(self, embed_data: dict[str, Any]) -> DeliveryResult:
@@ -36,8 +60,6 @@ class Discord(Messenger):
 
         options, payload = self.format_embed_data(embed_data)
 
-        self.data["content"] = "Stock alert"
-
         embed: dict[str, Any] = {"fields": []}
         for k, v in options.items():
             embed[k] = v
@@ -45,12 +67,16 @@ class Discord(Messenger):
             embed["fields"].append({"name": k, "value": f"{v}", "inline": True})
         embed["footer"] = {
             "text": f"Amiibot - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "icon_url": "https://user-images.githubusercontent.com/51025241/176945832-469f75d2-c3e8-4ba0-be54-77e1823b2987.png",
+            "icon_url": AVATAR_URL,
         }
-        self.data["embeds"] = [embed]
 
-        result = self.send_post(url=self.webhook_url, json=self.data)
-        return result
+        data = self._new_payload("Stock alert")
+        if self.mention and embed_data.get("Stock") in URGENT_STATUSES:
+            data["content"] = f"{self.mention} Stock alert"
+            data["allowed_mentions"] = self._allowed_mentions()
+        data["embeds"] = [embed]
+
+        return self.send_post(url=self.webhook_url, json=data)
 
     def format_embed_data(
         self, embed_data: dict[str, Any]

@@ -11,13 +11,16 @@ from constants import (
     OUTBOX_MAX_AGE_HOURS,
     OUTBOX_MAX_ATTEMPTS,
     RETRY_BACKOFF_FACTOR,
+    STOCKIST_FAILURE_ALERT_THRESHOLD,
     STOCKIST_HEALTH_RATIO,
 )
-from database import OUTBOX_DONE, OUTBOX_EXPIRED
+from database import OUTBOX_DONE, OUTBOX_EXPIRED, ScrapingRecovery
 from models import deduplicate_by_url, validate_products
 from result import DeliveryStatus, FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
+
+_MAX_ERROR_LENGTH = 200
 
 _FINAL_DELIVERY_STATUSES = {
     DeliveryStatus.SUCCESS.value,
@@ -34,6 +37,7 @@ class StockistResult:
     duration_seconds: float = 0
     consecutive_failures: int = 0
     error: str | None = None
+    recovery: ScrapingRecovery | None = None
 
 
 @dataclass
@@ -120,6 +124,8 @@ class Scraper:
                 # events queued by earlier runs still get retried.
                 notifications_sent += self._safe_flush_outbox(stockist)
 
+            self._safe_notify_stockist_health(stockist, result)
+
             if result is not None:
                 stockist_results.append(result)
             if result is not None and result.success:
@@ -189,7 +195,7 @@ class Scraper:
             self.database.record_scraping_failure(stockist.name)
             return None
 
-        self.database.record_scraping_success(stockist.name)
+        recovery = self.database.record_scraping_success(stockist.name)
 
         current_count = len(validated_items)
         healthy_count = self.database.get_last_healthy_count(stockist.name)
@@ -237,7 +243,72 @@ class Scraper:
             success=True,
             item_count=current_count,
             duration_seconds=round(elapsed, 2),
+            recovery=recovery if isinstance(recovery, ScrapingRecovery) else None,
         )
+
+    def _safe_notify_stockist_health(
+        self, stockist: Any, result: StockistResult | None
+    ) -> None:
+        """Send failure or recovery messages without ever breaking the cycle."""
+        try:
+            if result is not None and result.success:
+                self._notify_recovery(stockist, result)
+            else:
+                self._notify_failure(stockist, result)
+        except Exception as e:
+            log.error(
+                f"Error sending health message for {stockist.name}: {e}",
+                exc_info=True,
+            )
+
+    def _send_system_message(self, stockist: Any, message: str) -> bool:
+        """Send a plain text message to the stockist's messengers.
+
+        Returns True if at least one messenger delivered it. No cooldown, outbox
+        or mention is involved; failures are only logged.
+        """
+        delivered = False
+        for messenger in self.messengers.all_messengers:
+            if messenger.name not in stockist.messengers:
+                continue
+            try:
+                result = messenger.send_message(message)
+            except Exception as e:
+                log.error(f"{messenger.name} failed to send a health message: {e}")
+                continue
+            if result.status == DeliveryStatus.SUCCESS:
+                delivered = True
+        return delivered
+
+    def _notify_failure(self, stockist: Any, result: StockistResult | None) -> None:
+        failures, alert_sent_at = self.database.get_failure_alert_state(stockist.name)
+        if failures < STOCKIST_FAILURE_ALERT_THRESHOLD or alert_sent_at is not None:
+            return
+        error = (result.error if result is not None else None) or "returned no items"
+        error = " ".join(error.split())[:_MAX_ERROR_LENGTH]
+        message = (
+            f"Amiibot: {stockist.name} has failed {failures} runs in a row "
+            f"(last error: {error}). Alerts for it are paused until it recovers."
+        )
+        if self._send_system_message(stockist, message):
+            self.database.mark_failure_alert_sent(stockist.name)
+        else:
+            log.warning(
+                f"Could not deliver the failure message for {stockist.name}; "
+                f"will retry next run"
+            )
+
+    def _notify_recovery(self, stockist: Any, result: StockistResult) -> None:
+        recovery = result.recovery
+        if recovery is None or not recovery.alert_sent:
+            return
+        self._send_system_message(
+            stockist,
+            f"Amiibot: {stockist.name} is working again after "
+            f"{recovery.previous_failures} failed runs.",
+        )
+        # Cleared even if the send failed, so the message is never repeated.
+        self.database.clear_failure_alert(stockist.name)
 
     def _safe_flush_outbox(self, stockist: Any) -> int:
         try:

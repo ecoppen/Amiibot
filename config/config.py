@@ -73,12 +73,27 @@ class DatabaseConfig(BaseModel, use_enum_values=True, extra="forbid"):
             self.password = env_pass
 
 
+_MENTION_PATTERN = re.compile(r"(@here|@everyone|<@&\d+>|<@\d+>)")
+
+
 class DiscordMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
     active: bool = False
     embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.DISCORD.value]  # type: ignore
     webhook_url: str
     stockists: list[Stockist]
+    mention: str | None = None
+
+    @field_validator("mention")
+    @classmethod
+    def validate_mention(cls, v: str | None) -> str | None:
+        if v is not None and not _MENTION_PATTERN.fullmatch(v):
+            raise ValueError(
+                "mention must be @here, @everyone, a role mention such as "
+                "<@&123456789012345678>, or a user mention such as "
+                f"<@123456789012345678>, got: {v!r}"
+            )
+        return v
 
     @field_validator("webhook_url")
     @classmethod

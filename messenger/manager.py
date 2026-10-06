@@ -34,6 +34,7 @@ class MessageManager:
                     stockists=messenger_object.stockists,
                     webhook_url=messenger_object.webhook_url,
                     active=messenger_object.active,
+                    mention=messenger_object.mention,
                 )
                 self.all_messengers.append(discord)
                 if messenger_object.active:

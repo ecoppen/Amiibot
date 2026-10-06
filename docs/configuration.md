@@ -51,6 +51,33 @@ You can keep the password out of the file with the `DATABASE_PASSWORD` environme
 
 The webhook URL has to be an `https://discord.com/api/webhooks/<numeric id>/<token>` (or `discordapp.com`) URL. To make one, open the channel's settings in Discord, go to Integrations, then Webhooks, and create a new webhook. Each alert is posted as an embed with the product name, link, thumbnail, price, stock status and shop.
 
+#### Mentions
+
+To get pinged for the alerts that matter most, add an optional `mention` to the messenger:
+
+```json
+"uk_alerts": {
+  "messenger_type": "discord",
+  "webhook_url": "https://discord.com/api/webhooks/123456789/your-token",
+  "active": true,
+  "mention": "<@&123456789012345678>",
+  "stockists": ["nintendo.co.uk"]
+}
+```
+
+It has to be one of these:
+
+| Value | Pings |
+|-------|-------|
+| `@here` | Everyone online in the channel. |
+| `@everyone` | Everyone in the channel. |
+| `<@&ROLE_ID>` | A role. |
+| `<@USER_ID>` | One person. |
+
+Only "In stock" and "Pre-order" alerts ping. Every other message, including the [failure and recovery messages](alerts.md#when-a-shop-keeps-failing), never does, even if the text happens to contain a mention.
+
+To find a role ID, turn on Developer Mode in Discord (User Settings, Advanced), then right-click the role in the server settings, choose Copy Role ID, and write it as `<@&` followed by the ID and `>`. For a person, right-click their name and choose Copy User ID, and write it as `<@` followed by the ID and `>`. If a role ping doesn't fire, check that the role is set to be mentionable in the server settings.
+
 ### Telegram
 
 ```json
