@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -21,93 +22,340 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestCexUK:
-    """Test CeX UK JSON parser."""
+    """Test CeX UK Algolia search client."""
 
     @pytest.fixture
     def stockist(self):
         return CexUK(messengers=["test_messenger"])
 
-    BOXES_JSON = b"""
-    {
-        "response": {
-            "data": {
-                "boxes": [
+    @staticmethod
+    def _response(hits, nb_hits=None, nb_pages=1):
+        response = Mock()
+        response.content = json.dumps(
+            {
+                "results": [
                     {
-                        "boxName": "Test Amiibo",
-                        "imageUrls": {"medium": "https://img.test/a.jpg"},
-                        "boxId": "12345",
-                        "sellPrice": "19.99"
+                        "hits": hits,
+                        "nbHits": len(hits) if nb_hits is None else nb_hits,
+                        "nbPages": nb_pages,
                     }
                 ]
             }
-        }
-    }
-    """
+        ).encode()
+        return response
 
-    def test_happy_path(self, stockist):
-        null_json = b'{"response": {"data": null}}'
-        mock_response = Mock()
-        mock_response.content = self.BOXES_JSON
-        mock_null = Mock()
-        mock_null.content = null_json
+    @staticmethod
+    def _hit(box_id="1", **extra):
+        hit = {
+            "boxId": box_id,
+            "boxName": f"Amiibo {box_id}",
+            "sellPrice": 10,
+            "ecomQuantity": 5,
+            "imageUrls": {"medium": "https://img.test/m.jpg"},
+        }
+        hit.update(extra)
+        return hit
+
+    @staticmethod
+    def _filters(call):
+        """The `filters` of the search sent in a post() call."""
+        body = json.loads(call.kwargs["data"])
+        params = parse_qs(body["requests"][0]["params"])
+        return params["filters"][0], int(params["page"][0])
+
+    def test_parses_real_response(self, stockist):
+        fixture = Mock()
+        fixture.content = (FIXTURES / "cexuk_search.json").read_bytes()
+        with patch.object(CexUK, "post", return_value=fixture) as mock_post:
+            result = stockist.get_amiibo()
+
+        mock_post.assert_called_once()
+        assert len(result) == 4
+        assert result[0] == {
+            "Colour": 0x00FF00,
+            "Title": "Nintendo Amiibo Link Figure",
+            "Image": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352400_m.jpg",
+            "URL": "https://uk.webuy.com/product-detail?id=045496352400",
+            "Price": "£15.00",
+            "Stock": Stock.IN_STOCK.value,
+            "Website": "CeX UK",
+        }
+        assert [item["Stock"] for item in result] == [
+            Stock.IN_STOCK.value,
+            Stock.IN_STOCK.value,
+            Stock.IN_STOCK.value,
+            Stock.OUT_OF_STOCK.value,
+        ]
+        assert result[3]["Colour"] == 0xFF0000
+
+    def test_request_shape(self, stockist):
         with patch.object(
-            CexUK,
-            "scrape",
-            side_effect=[mock_response, mock_null, mock_response, mock_null],
+            CexUK, "post", return_value=self._response([self._hit()])
+        ) as mock_post:
+            stockist.get_amiibo()
+
+        kwargs = mock_post.call_args.kwargs
+        assert kwargs["url"] == "https://search.webuy.io/1/indexes/*/queries"
+        assert (
+            kwargs["params"]["x-algolia-api-key"] == "bf79f2b6699e60a18ae330a1248b452c"
+        )
+        assert kwargs["params"]["x-algolia-application-id"] == "LNNFEEWZVA"
+        assert kwargs["params"]["x-algolia-agent"].startswith("Algolia for JavaScript")
+        assert kwargs["headers"]["Content-Type"] == "text/plain"
+        assert kwargs["headers"]["Origin"] == "https://uk.webuy.com"
+
+        request = json.loads(kwargs["data"])["requests"][0]
+        assert request["indexName"] == "prod_cex_uk"
+        params = parse_qs(request["params"], keep_blank_values=True)
+        assert params["hitsPerPage"] == ["1000"]
+        assert params["query"] == [""]
+        assert json.loads(params["attributesToRetrieve"][0]) == [
+            "boxId",
+            "boxName",
+            "sellPrice",
+            "imageUrls",
+            "ecomQuantity",
+        ]
+        filters = params["filters"][0]
+        assert "categoryFriendlyName:Amiibo" in filters
+        assert "boxVisibilityOnWeb=1" in filters
+        assert "sellPrice > 0" in filters
+        # Sold-out items must be visible so restocks can be seen.
+        assert "inStockOnline" not in filters
+
+    @pytest.mark.parametrize("quantity", [0, -1, None, "3", True])
+    def test_anything_but_a_positive_quantity_is_out_of_stock(self, stockist, quantity):
+        response = self._response([self._hit(ecomQuantity=quantity)])
+        with patch.object(CexUK, "post", return_value=response):
+            result = stockist.get_amiibo()
+
+        assert result[0]["Stock"] == Stock.OUT_OF_STOCK.value
+
+    def test_missing_quantity_is_out_of_stock(self, stockist):
+        hit = self._hit()
+        del hit["ecomQuantity"]
+        with patch.object(CexUK, "post", return_value=self._response([hit])):
+            result = stockist.get_amiibo()
+
+        assert result[0]["Stock"] == Stock.OUT_OF_STOCK.value
+
+    def test_price_is_formatted_to_two_places(self, stockist):
+        hits = [
+            self._hit("1", sellPrice=7),
+            self._hit("2", sellPrice=12.5),
+            self._hit("3", sellPrice="9.99"),
+        ]
+        with patch.object(CexUK, "post", return_value=self._response(hits)):
+            result = stockist.get_amiibo()
+
+        assert [item["Price"] for item in result] == ["£7.00", "£12.50", "£9.99"]
+
+    @pytest.mark.parametrize(
+        "image_urls,expected",
+        [
+            (
+                {"medium": "https://i.test/m.jpg", "large": "https://i.test/l.jpg"},
+                "https://i.test/m.jpg",
+            ),
+            ({"medium": None, "large": "https://i.test/l.jpg"}, "https://i.test/l.jpg"),
+            ({"medium": "//i.test/m.jpg"}, "https://i.test/m.jpg"),
+            ({"medium": "http://i.test/m.jpg"}, "https://i.test/m.jpg"),
+            ({"medium": None, "large": None}, ""),
+            (None, ""),
+        ],
+    )
+    def test_image_choice(self, stockist, image_urls, expected):
+        response = self._response([self._hit(imageUrls=image_urls)])
+        with patch.object(CexUK, "post", return_value=response):
+            result = stockist.get_amiibo()
+
+        assert result[0]["Image"] == expected
+
+    def test_unreadable_hits_are_skipped_and_duplicates_dropped(self, stockist):
+        hits = [
+            self._hit("1"),
+            {"boxId": "2", "boxName": "No price"},
+            {"boxName": "No id", "sellPrice": 5},
+            self._hit("1"),
+            self._hit("3", sellPrice="free"),
+        ]
+        with patch.object(CexUK, "post", return_value=self._response(hits)):
+            result = stockist.get_amiibo()
+
+        assert [item["Title"] for item in result] == ["Amiibo 1"]
+
+    def test_fetches_every_page(self, stockist):
+        pages = [
+            self._response([self._hit("1"), self._hit("2")], nb_hits=3, nb_pages=2),
+            self._response([self._hit("3")], nb_hits=3, nb_pages=2),
+        ]
+        with patch.object(CexUK, "post", side_effect=pages) as mock_post:
+            result = stockist.get_amiibo()
+
+        assert [item["Title"] for item in result] == [
+            "Amiibo 1",
+            "Amiibo 2",
+            "Amiibo 3",
+        ]
+        assert [self._filters(c)[1] for c in mock_post.call_args_list] == [0, 1]
+
+    def test_page_loop_is_capped(self, stockist):
+        endless = self._response([self._hit()], nb_hits=500, nb_pages=10_000)
+        with patch.object(CexUK, "post", return_value=endless) as mock_post:
+            stockist.get_amiibo()
+
+        assert mock_post.call_count == 20
+
+    def test_under_the_cap_uses_a_single_query(self, stockist):
+        response = self._response([self._hit()], nb_hits=999)
+        with patch.object(CexUK, "post", return_value=response) as mock_post:
+            result = stockist.get_amiibo()
+
+        mock_post.assert_called_once()
+        assert len(result) == 1
+
+    def test_over_the_cap_splits_by_stock(self, stockist, caplog):
+        responses = [
+            self._response([self._hit("1")], nb_hits=1200),
+            self._response([self._hit("2")], nb_hits=900),
+            self._response([self._hit("3", ecomQuantity=0)], nb_hits=300),
+        ]
+        with (
+            patch.object(CexUK, "post", side_effect=responses) as mock_post,
+            caplog.at_level("WARNING", logger="stockist.cexuk"),
         ):
             result = stockist.get_amiibo()
 
-        assert len(result) == 2
-        assert result[0]["Title"] == "Test Amiibo"
-        assert result[0]["URL"] == "https://uk.webuy.com/product-detail/?id=12345"
-        assert result[0]["Price"] == "£19.99"
-        assert result[0]["Stock"] == Stock.IN_STOCK.value
-        assert stockist.params["firstRecord"] == 51
+        filters = [self._filters(c)[0] for c in mock_post.call_args_list]
+        assert "inStockOnline" not in filters[0]
+        assert filters[1].endswith("inStockOnline=1")
+        assert filters[2].endswith("inStockOnline=0")
+        # The first, over-large query's hits are discarded, not mixed in.
+        assert [item["Title"] for item in result] == ["Amiibo 2", "Amiibo 3"]
+        assert result[1]["Stock"] == Stock.OUT_OF_STOCK.value
+        assert "splitting by stock" in caplog.text
 
-    def test_invalid_json_returns_empty(self, stockist):
-        mock_response = Mock()
-        mock_response.content = b"not json"
-        with patch.object(CexUK, "scrape", return_value=mock_response):
+    def test_split_dedupes_an_item_that_changed_stock_mid_run(self, stockist):
+        responses = [
+            self._response([self._hit("1")], nb_hits=1200),
+            self._response([self._hit("2")], nb_hits=2),
+            self._response([self._hit("2")], nb_hits=1),
+        ]
+        with patch.object(CexUK, "post", side_effect=responses):
+            result = stockist.get_amiibo()
+
+        assert len(result) == 1
+
+    @pytest.mark.parametrize("which", [1, 2])
+    def test_a_subset_still_over_the_cap_fails_rather_than_truncating(
+        self, stockist, which, caplog
+    ):
+        responses = [
+            self._response([self._hit("1")], nb_hits=2500),
+            self._response([self._hit("2")], nb_hits=1000 if which == 1 else 10),
+            self._response([self._hit("3")], nb_hits=1000),
+        ]
+        with (
+            patch.object(CexUK, "post", side_effect=responses),
+            caplog.at_level("WARNING", logger="stockist.cexuk"),
+        ):
+            result = stockist.get_amiibo()
+
+        assert result == []
+        assert "list would be incomplete" in caplog.text
+
+    def test_failure_on_a_later_page_returns_nothing_rather_than_a_partial_list(
+        self, stockist
+    ):
+        from stockist.utils import BlankResponse
+
+        pages = [
+            self._response([self._hit("1")], nb_hits=2, nb_pages=2),
+            BlankResponse(),
+        ]
+        with patch.object(CexUK, "post", side_effect=pages):
             result = stockist.get_amiibo()
 
         assert result == []
 
-    def test_attributes_error_returns_empty(self, stockist):
-        mock_response = Mock()
-        mock_response.content = None
-        with patch.object(CexUK, "scrape", return_value=mock_response):
-            result = stockist.get_amiibo()
-
-        assert result == []
-
-    def test_empty_response_logs_a_clear_error(self, stockist, caplog):
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_auth_failure_says_the_key_may_have_changed(self, stockist, status, caplog):
         from stockist.utils import BlankResponse
 
         with (
-            patch.object(CexUK, "scrape", return_value=BlankResponse()),
+            patch.object(CexUK, "post", return_value=BlankResponse(status)),
+            caplog.at_level("ERROR", logger="stockist.cexuk"),
+        ):
+            result = stockist.get_amiibo()
+
+        assert result == []
+        assert f"HTTP {status}" in caplog.text
+        assert "key" in caplog.text and "may have changed" in caplog.text
+
+    def test_other_http_error_is_a_plain_failure(self, stockist, caplog):
+        from stockist.utils import BlankResponse
+
+        with (
+            patch.object(CexUK, "post", return_value=BlankResponse(500)),
             caplog.at_level("ERROR", logger="stockist.cexuk"),
         ):
             result = stockist.get_amiibo()
 
         assert result == []
         assert "request failed or returned nothing" in caplog.text
+        assert "may have changed" not in caplog.text
 
-    def test_missing_boxes_key_breaks(self, stockist):
-        no_boxes = b'{"response": {"data": {"other": 1}}}'
-        mock_response = Mock()
-        mock_response.content = no_boxes
-        with patch.object(CexUK, "scrape", return_value=mock_response):
+    @pytest.mark.parametrize("content", [b"", None])
+    def test_empty_response_logs_a_clear_error(self, stockist, content, caplog):
+        response = Mock()
+        response.content = content
+        with (
+            patch.object(CexUK, "post", return_value=response),
+            caplog.at_level("ERROR", logger="stockist.cexuk"),
+        ):
             result = stockist.get_amiibo()
 
         assert result == []
+        assert "request failed or returned nothing" in caplog.text
+        assert "decode" not in caplog.text
 
-    def test_missing_response_key_breaks(self, stockist):
-        mock_response = Mock()
-        mock_response.content = b'{"other": 1}'
-        with patch.object(CexUK, "scrape", return_value=mock_response):
+    def test_invalid_json_returns_empty(self, stockist, caplog):
+        response = Mock()
+        response.content = b"not json"
+        with (
+            patch.object(CexUK, "post", return_value=response),
+            caplog.at_level("ERROR", logger="stockist.cexuk"),
+        ):
             result = stockist.get_amiibo()
 
         assert result == []
+        assert "Invalid JSON" in caplog.text
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            b'{"other": 1}',
+            b'{"results": []}',
+            b'{"results": [{"nbHits": 1}]}',
+            b'{"results": [{"hits": [], "nbHits": "x", "nbPages": 1}]}',
+            b"[]",
+        ],
+    )
+    def test_unexpected_shape_returns_empty(self, stockist, content, caplog):
+        response = Mock()
+        response.content = content
+        with (
+            patch.object(CexUK, "post", return_value=response),
+            caplog.at_level("ERROR", logger="stockist.cexuk"),
+        ):
+            result = stockist.get_amiibo()
+
+        assert result == []
+        assert "unexpected search response" in caplog.text
+
+    def test_no_hits_returns_empty(self, stockist):
+        with patch.object(CexUK, "post", return_value=self._response([])):
+            assert stockist.get_amiibo() == []
 
 
 class TestBestbuyCA:

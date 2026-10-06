@@ -1,5 +1,6 @@
 import logging
 import secrets
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlencode
 
@@ -54,10 +55,15 @@ def _get_session() -> requests.Session:
 
 
 class BlankResponse:
-    """Stand-in returned when a request fails; its body is empty bytes."""
+    """Stand-in returned when a request fails; its body is empty bytes.
 
-    def __init__(self):
+    `status_code` is the HTTP status when the shop answered with an error, and
+    None when there was no answer at all (a timeout, say).
+    """
+
+    def __init__(self, status_code: int | None = None):
         self.content = b""
+        self.status_code = status_code
 
 
 def build_url(url: str, payload: dict[str, Any] | None = None) -> str:
@@ -69,12 +75,11 @@ def build_url(url: str, payload: dict[str, Any] | None = None) -> str:
     return f"{url}{separator}{query_string}"
 
 
-def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
+def _guarded(send: Callable[[], Any]) -> Any:
+    """Run a request, returning a BlankResponse instead of raising on failure."""
     empty_response = BlankResponse()
-    url = build_url(url, payload)
-
     try:
-        response = _get_session().get(url=url, timeout=timeout)
+        response = send()
         response.raise_for_status()
         return response
     except requests.exceptions.Timeout:
@@ -85,7 +90,8 @@ def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
         return empty_response
     except requests.exceptions.HTTPError as e:
         log.warning(f"HTTP error: {e}")
-        return empty_response
+        failed = getattr(e, "response", None)
+        return BlankResponse(getattr(failed, "status_code", None))
     except requests.exceptions.TooManyRedirects:
         log.warning("Too many redirects")
         return empty_response
@@ -95,3 +101,22 @@ def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
     except requests.exceptions.RequestException as e:
         log.warning(f"Request exception: {e}")
         return empty_response
+
+
+def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
+    url = build_url(url, payload)
+    return _guarded(lambda: _get_session().get(url=url, timeout=timeout))
+
+
+def send_public_post(
+    url, params=None, data=None, headers=None, timeout=REQUEST_TIMEOUT
+):
+    """POST through the shared session (so it has the same default headers).
+
+    Unlike GET requests, POSTs are not retried.
+    """
+    return _guarded(
+        lambda: _get_session().post(
+            url=url, params=params, data=data, headers=headers, timeout=timeout
+        )
+    )

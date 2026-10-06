@@ -1,7 +1,6 @@
 import logging
 from typing import Any
 
-from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
 from stockist.gamestop import Gamestop
@@ -13,7 +12,6 @@ log = logging.getLogger(__name__)
 
 # Stockist factory mapping
 STOCKIST_FACTORY = {
-    "bestbuy.com": Bestbuy,
     "bestbuy.ca": BestbuyCA,
     "gamestop.com": Gamestop,
     "nintendo.co.uk": NintendoUK,

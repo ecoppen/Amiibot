@@ -28,7 +28,7 @@ If a shop fails six runs in a row you get a message in your alert channel (see [
 
 ## Selenium or Chrome errors
 
-You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops need a real browser: GameStop and Play-Asia always (they block plain HTTP requests), and Best Buy (US) and ShopTo only as a fallback when a plain request returns no products. Play-Asia opens a fresh browser for each of its pages, so it is the slowest shop. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.
+You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops need a real browser: GameStop and Play-Asia always (they block plain HTTP requests), and ShopTo only as a fallback when a plain request returns no products. Play-Asia opens a fresh browser for each of its pages, so it is the slowest shop. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.
 
 On a Raspberry Pi or other ARM Linux box that automatic download often doesn't work. Install the browser and driver from your distro instead, which is usually `chromium` and `chromium-driver` on Debian-based systems (the package names vary).
 

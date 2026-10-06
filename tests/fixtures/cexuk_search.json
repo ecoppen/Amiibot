@@ -1,0 +1,69 @@
+{
+  "results": [
+    {
+      "hits": [
+        {
+          "boxId": "045496352400",
+          "boxName": "Nintendo Amiibo Link Figure",
+          "ecomQuantity": 30,
+          "imageUrls": {
+            "large": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352400_l.jpg",
+            "masterBoxLarge": null,
+            "masterBoxMedium": null,
+            "masterBoxSmall": null,
+            "medium": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352400_m.jpg",
+            "small": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352400_s.jpg"
+          },
+          "sellPrice": 15
+        },
+        {
+          "boxId": "045496352875",
+          "boxName": "Nintendo Amiibo Charizard Figure",
+          "ecomQuantity": 30,
+          "imageUrls": {
+            "large": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352875_l.jpg",
+            "masterBoxLarge": null,
+            "masterBoxMedium": null,
+            "masterBoxSmall": null,
+            "medium": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352875_m.jpg",
+            "small": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352875_s.jpg"
+          },
+          "sellPrice": 18
+        },
+        {
+          "boxId": "045496352363",
+          "boxName": "Nintendo Amiibo Mario Figure",
+          "ecomQuantity": 30,
+          "imageUrls": {
+            "large": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352363_l.jpg",
+            "masterBoxLarge": null,
+            "masterBoxMedium": null,
+            "masterBoxSmall": null,
+            "medium": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352363_m.jpg",
+            "small": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352363_s.jpg"
+          },
+          "sellPrice": 10
+        },
+        {
+          "boxId": "045496352486",
+          "boxName": "Nintendo Amiibo Zelda Figure",
+          "ecomQuantity": 0,
+          "imageUrls": {
+            "large": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352486_l.jpg",
+            "masterBoxLarge": null,
+            "masterBoxMedium": null,
+            "masterBoxSmall": null,
+            "medium": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352486_m.jpg",
+            "small": "https://uk.static.webuy.com/product_images/Gaming/Amiibo/045496352486_s.jpg"
+          },
+          "sellPrice": 12
+        }
+      ],
+      "hitsPerPage": 1000,
+      "index": "prod_cex_uk",
+      "nbHits": 4,
+      "nbPages": 1,
+      "page": 0
+    }
+  ]
+}

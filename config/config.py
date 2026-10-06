@@ -52,6 +52,7 @@ class Stockist(Enum):
 # dropped with a warning when the config is validated.
 REMOVED_STOCKISTS: frozenset[str] = frozenset(
     {
+        Stockist.BESTBUY.value,
         Stockist.GAMEUK.value,
         Stockist.MECCHAJAPAN.value,
         Stockist.THESOURCE.value,

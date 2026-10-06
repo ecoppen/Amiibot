@@ -11,7 +11,6 @@ import requests
 from selenium.common.exceptions import WebDriverException
 
 from constants import REQUEST_TIMEOUT
-from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
 from stockist.gamestop import Gamestop
@@ -339,6 +338,72 @@ class TestStockistUtils:
         assert called_url == "https://test.com"
 
 
+class TestSendPublicPost:
+    @patch("stockist.utils._get_session")
+    def test_posts_through_the_shared_session(self, mock_session_fn):
+        from stockist.utils import send_public_post
+
+        mock_response = Mock(status_code=200, content=b"{}")
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_post(
+            url="https://test.com/q",
+            params={"k": "v"},
+            data="{}",
+            headers={"Content-Type": "text/plain"},
+        )
+
+        assert result == mock_response
+        kwargs = mock_session.post.call_args.kwargs
+        assert kwargs["url"] == "https://test.com/q"
+        assert kwargs["params"] == {"k": "v"}
+        assert kwargs["data"] == "{}"
+        assert kwargs["headers"] == {"Content-Type": "text/plain"}
+        assert kwargs["timeout"] == REQUEST_TIMEOUT
+
+    @patch("stockist.utils._get_session")
+    def test_http_error_keeps_the_status_code(self, mock_session_fn):
+        from stockist.utils import BlankResponse, send_public_post
+
+        failed = requests.Response()
+        failed.status_code = 403
+        failed.url = "https://test.com/q"
+        mock_session = Mock()
+        mock_session.post.return_value = failed
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_post(url="https://test.com/q")
+
+        assert isinstance(result, BlankResponse)
+        assert result.content == b""
+        assert result.status_code == 403
+
+    @patch("stockist.utils._get_session")
+    def test_network_error_has_no_status_code(self, mock_session_fn):
+        from stockist.utils import BlankResponse, send_public_post
+
+        mock_session = Mock()
+        mock_session.post.side_effect = requests.exceptions.Timeout
+        mock_session_fn.return_value = mock_session
+
+        result = send_public_post(url="https://test.com/q")
+
+        assert isinstance(result, BlankResponse)
+        assert result.status_code is None
+
+    @patch("stockist.stockist.send_public_post")
+    def test_stockist_post_uses_its_timeout(self, mock_post):
+        stockist = Stockist(messengers=["test"])
+        stockist.request_timeout = 12
+
+        stockist.post(url="https://test.com", params={"a": 1}, data="x", headers={})
+
+        assert mock_post.call_args.kwargs["timeout"] == 12
+        assert mock_post.call_args.kwargs["data"] == "x"
+
+
 class TestBuildUrl:
     def test_appends_with_question_mark(self):
         from stockist.utils import build_url
@@ -385,7 +450,6 @@ class TestEmptyResponseHandling:
         [
             (NintendoUK, "stockist.nintendouk"),
             (BestbuyCA, "stockist.bestbuyca"),
-            (CexUK, "stockist.cexuk"),
         ],
     )
     def test_blank_response_logs_clear_error(self, stockist_class, logger_name, caplog):
@@ -412,7 +476,7 @@ class TestStockistManager:
         """Create mock messenger."""
         messenger = Mock()
         messenger.name = "test_messenger"
-        messenger.stockists = ["bestbuy.com"]
+        messenger.stockists = ["bestbuy.ca"]
         return messenger
 
     @pytest.fixture
@@ -427,14 +491,14 @@ class TestStockistManager:
         manager = StockistManager(messengers=mock_messengers)
 
         assert len(manager.all_stockists) == 1
-        assert isinstance(manager.all_stockists[0], Bestbuy)
-        assert "bestbuy.com" in manager.relationships
+        assert isinstance(manager.all_stockists[0], BestbuyCA)
+        assert "bestbuy.ca" in manager.relationships
 
     def test_stockist_manager_multiple_stockists(self):
         """Test StockistManager with multiple stockists."""
         messenger1 = Mock()
         messenger1.name = "messenger1"
-        messenger1.stockists = ["bestbuy.com", "gamestop.com"]
+        messenger1.stockists = ["bestbuy.ca", "gamestop.com"]
 
         messenger2 = Mock()
         messenger2.name = "messenger2"
@@ -446,7 +510,7 @@ class TestStockistManager:
         manager = StockistManager(messengers=messengers)
 
         assert len(manager.all_stockists) == 3
-        assert "bestbuy.com" in manager.relationships
+        assert "bestbuy.ca" in manager.relationships
         assert "gamestop.com" in manager.relationships
         assert "nintendo.co.uk" in manager.relationships
 
@@ -477,7 +541,6 @@ class TestStockistManager:
     def test_stockist_factory_completeness(self):
         """Test that STOCKIST_FACTORY has all expected stockists."""
         expected_stockists = [
-            "bestbuy.com",
             "bestbuy.ca",
             "gamestop.com",
             "nintendo.co.uk",
@@ -490,7 +553,7 @@ class TestStockistManager:
             assert stockist in STOCKIST_FACTORY
 
     @pytest.mark.parametrize(
-        "removed", ["game.co.uk", "meccha-japan.com", "thesource.ca"]
+        "removed", ["bestbuy.com", "game.co.uk", "meccha-japan.com", "thesource.ca"]
     )
     def test_removed_stockists_are_not_in_factory(self, removed):
         assert removed not in STOCKIST_FACTORY
@@ -524,11 +587,6 @@ class TestStockistManager:
 @pytest.mark.parametrize(
     "stockist_class,expected_name,expected_base_url",
     [
-        (
-            Bestbuy,
-            "Bestbuy US",
-            "https://www.bestbuy.com/site/toys-to-life/amiibo/pcmcat385200050004.c?intl=nosplash",
-        ),
         (BestbuyCA, "Bestbuy CA", "https://www.bestbuy.ca/api/v2/json/search"),
         (
             Gamestop,
@@ -546,7 +604,7 @@ class TestStockistManager:
             "https://www.play-asia.com/games/amiibos/14/712od",
         ),
         (Shopto, "Shopto", "https://www.shopto.net/en/search/?input_search=amiibo"),
-        (CexUK, "CeX UK", "https://wss2.cex.uk.webuy.io/v3/boxes"),
+        (CexUK, "CeX UK", "https://search.webuy.io/1/indexes/*/queries"),
     ],
 )
 class TestStockistImplementations:
@@ -593,50 +651,6 @@ class TestStockistImplementations:
         result = stockist.scrape(url="https://test.com", payload=None)
 
         assert result == mock_response
-
-
-class TestBestbuySpecific:
-    """Test Bestbuy-specific functionality."""
-
-    @pytest.fixture
-    def bestbuy(self):
-        """Create Bestbuy instance."""
-        return Bestbuy(messengers=["test_messenger"])
-
-    def test_bestbuy_params_none(self, bestbuy):
-        """Test Bestbuy params is None."""
-        assert bestbuy.params is None
-
-    @patch("stockist.bestbuy.Bestbuy.scrape")
-    def test_bestbuy_get_amiibo_with_cards(self, mock_scrape, bestbuy):
-        """Test Bestbuy get_amiibo with valid HTML."""
-        mock_response = Mock()
-        mock_response.content = b"""
-        <html>
-            <li class="sku-item">
-                <h4 class="sku-title"><a href="/test">Test Amiibo</a></h4>
-                <button class="c-button">Add to Cart</button>
-                <div class="priceView-hero-price"><span>$19.99</span></div>
-                <img class="product-image" src="https://test.com/image.jpg" />
-            </li>
-        </html>
-        """
-        mock_scrape.return_value = mock_response
-
-        result = bestbuy.get_amiibo()
-
-        assert isinstance(result, list)
-
-    @patch("stockist.bestbuy.Bestbuy.scrape")
-    def test_bestbuy_get_amiibo_empty_page(self, mock_scrape, bestbuy):
-        """Test Bestbuy get_amiibo with empty HTML."""
-        mock_response = Mock()
-        mock_response.content = b"<html></html>"
-        mock_scrape.return_value = mock_response
-
-        result = bestbuy.get_amiibo()
-
-        assert isinstance(result, list)
 
 
 class TestNintendoUKSpecific:

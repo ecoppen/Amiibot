@@ -107,7 +107,6 @@ An inactive messenger still counts when working out which shops to scrape, so a 
 
 | Shop | Value | Country |
 |------|-------|---------|
-| Best Buy | `bestbuy.com` | 🇺🇸 |
 | GameStop | `gamestop.com` | 🇺🇸 |
 | Best Buy Canada | `bestbuy.ca` | 🇨🇦 |
 | Nintendo UK | `nintendo.co.uk` | 🇬🇧 |
@@ -117,7 +116,7 @@ An inactive messenger still counts when working out which shops to scrape, so a 
 
 ### Removed shops
 
-Three shops are no longer supported because they stopped working: GAME (`game.co.uk`, the amiibo page is gone), The Source (`thesource.ca`, the site has closed and redirects to Best Buy) and Meccha Japan (`meccha-japan.com`, it now puts an "I'm not a robot" check in front of every page). They are not scraped any more.
+Four shops are no longer supported because they stopped working: Best Buy US (`bestbuy.com`, it serves an empty product list to automated browsers behind bot detection and reCAPTCHA, so it can't be scraped reliably), GAME (`game.co.uk`, the amiibo page is gone), The Source (`thesource.ca`, the site has closed and redirects to Best Buy) and Meccha Japan (`meccha-japan.com`, it now puts an "I'm not a robot" check in front of every page). They are not scraped any more. Best Buy US could come back through Best Buy's official Products API, which needs a free developer key.
 
 If one of them is still in your `config.json` the config still loads. Amiibot ignores it and writes a warning such as "game.co.uk is no longer supported and is ignored; remove it from config.json" to the log. It's worth deleting the entry to silence the warning. If a messenger has nothing but removed shops in its list, the config is rejected with an error saying so, because that messenger would have nothing to watch.
 

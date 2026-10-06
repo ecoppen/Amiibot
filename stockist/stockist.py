@@ -15,7 +15,7 @@ from constants import (
     REQUEST_TIMEOUT,
     SELENIUM_WAIT_MAX,
 )
-from stockist.utils import build_url, send_public_request
+from stockist.utils import build_url, send_public_post, send_public_request
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,21 @@ class Stockist:
     def scrape(self, url: str, payload: dict[str, Any] | None) -> Any:
         return send_public_request(
             url=url, payload=payload, timeout=self.request_timeout
+        )
+
+    def post(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        data: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        return send_public_post(
+            url=url,
+            params=params,
+            data=data,
+            headers=headers,
+            timeout=self.request_timeout,
         )
 
     def scrape_with_selenium(

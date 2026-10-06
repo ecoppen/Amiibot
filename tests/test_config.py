@@ -24,7 +24,7 @@ class TestConfiguration:
                     "webhook_url": "https://discord.com/api/webhooks/123/abc",
                     "active": True,
                     "embedded_messages": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                 }
             },
         }
@@ -130,7 +130,7 @@ class TestConfiguration:
                     "chat_id": "123456789",
                     "active": True,
                     "embedded_messages": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                 }
             },
         }
@@ -172,7 +172,7 @@ class TestConfiguration:
                     "webhook_url": "https://discord.com/api/webhooks/123/abc",
                     "active": True,
                     "embedded_messages": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                 }
             },
         }
@@ -198,7 +198,7 @@ class TestConfiguration:
                     "webhook_url": "https://discord.com/api/webhooks/123/abc",
                     "active": False,
                     "embedded_messages": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                 }
             },
         }
@@ -223,7 +223,7 @@ class TestConfiguration:
                     "webhook_url": "https://discord.com/api/webhooks/111/aaa",
                     "active": True,
                     "embedded_messages": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                 },
                 "telegram1": {
                     "messenger_type": "telegram",
@@ -253,7 +253,7 @@ class TestConfiguration:
         from config.config import Stockist
 
         # Test that common stockists are available
-        assert "bestbuy.com" in [s.value for s in Stockist]
+        assert "bestbuy.ca" in [s.value for s in Stockist]
         assert "gamestop.com" in [s.value for s in Stockist]
         assert "nintendo.co.uk" in [s.value for s in Stockist]
 
@@ -329,7 +329,7 @@ class TestDiscordMention:
                     "messenger_type": "discord",
                     "webhook_url": "https://discord.com/api/webhooks/123/abc",
                     "active": True,
-                    "stockists": ["bestbuy.com"],
+                    "stockists": ["bestbuy.ca"],
                     "mention": "<@&42>",
                 }
             },
@@ -344,7 +344,7 @@ class TestDiscordMention:
             temp_path.unlink()
 
 
-REMOVED_SHOPS = ["game.co.uk", "thesource.ca", "meccha-japan.com"]
+REMOVED_SHOPS = ["bestbuy.com", "game.co.uk", "thesource.ca", "meccha-japan.com"]
 
 
 class TestRemovedStockists:
@@ -437,10 +437,10 @@ class TestRemovedStockists:
     def test_supported_stockists_are_untouched_and_quiet(self, caplog):
         with caplog.at_level("WARNING", logger="config.config"):
             config = self._load(
-                {"m": self._messenger("discord", ["bestbuy.com", "play-asia.com"])}
+                {"m": self._messenger("discord", ["bestbuy.ca", "play-asia.com"])}
             )
 
-        assert config.messengers["m"].stockists == ["bestbuy.com", "play-asia.com"]
+        assert config.messengers["m"].stockists == ["bestbuy.ca", "play-asia.com"]
         assert "no longer supported" not in caplog.text
 
     def test_unknown_stockist_is_still_rejected(self):
