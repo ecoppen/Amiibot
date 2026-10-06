@@ -28,6 +28,18 @@ class TestValidateProducts:
         assert valid[0]["Title"] == "Mario"
         assert valid[0]["Stock"] == "In Stock"
 
+    def test_surrounding_whitespace_trimmed_without_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="models"):
+            valid, _ = validate_products([_item(Title=" Leon amiibo\t\n")])
+        assert valid[0]["Title"] == "Leon amiibo"
+        assert "Stripped control characters" not in caplog.text
+
+    def test_embedded_control_characters_still_warn(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="models"):
+            valid, _ = validate_products([_item(Title="Leon\x00 amiibo")])
+        assert valid[0]["Title"] == "Leon amiibo"
+        assert "Stripped control characters" in caplog.text
+
     def test_release_absent_when_none(self):
         valid, _ = validate_products([_item()])
         assert "Release" not in valid[0]

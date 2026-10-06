@@ -41,6 +41,9 @@ _control_char_pattern = re.compile(
 
 
 def _strip_control_characters(text: str) -> str:
+    # Surrounding whitespace (e.g. a trailing tab in a shop's product title)
+    # is routine, so trim it quietly and only warn about embedded characters.
+    text = text.strip()
     stripped = _control_char_pattern.sub("", text)
     if stripped != text:
         import logging
