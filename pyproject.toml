@@ -10,9 +10,9 @@ dependencies = [
     "pydantic>=2.13.4",
     "requests>=2.33.0",
     "selenium>=4.46.0",
-    "soupsieve>=2.8.4",
+    "soupsieve>=2.10",
     "sqlalchemy>=2.0.51",
-    "urllib3>=2.7.0",
+    "urllib3>=2.8.0",
 ]
 
 [dependency-groups]
@@ -20,7 +20,8 @@ dev = [
     "black>=26.3.1",
     "click>=8.3.3",
     "mkdocs>=1.6.1",
-    "mkdocs-material>=9.5.0",
+    "mkdocs-material>=9.7.7",
+    "pip>=26.2",
     "pip-audit>=2.8.0",
     "pre-commit>=4.6.0",
     "pygments>=2.20.0",
@@ -30,6 +31,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.15.21",
     "types-requests>=2.32.0",
+    "virtualenv>=21.7",
 ]
 
 [tool.pyright]
@@ -70,3 +72,7 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
+
+[tool.ruff.lint]
+# Pin the pre-0.16 default rule set; adopting the expanded defaults is a separate change.
+select = ["E4", "E7", "E9", "F"]
