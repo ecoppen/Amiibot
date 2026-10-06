@@ -362,6 +362,87 @@ class TestDiscordPayloads:
         assert embed["footer"]["icon_url"]
 
     @patch("messenger.discord.Discord.send_post")
+    def test_long_title_is_truncated_to_discord_limit(self, mock_post):
+        mock_post.return_value = self._ok()
+        title = "A" * 300
+
+        result = self._discord().send_embed_message({**self.ITEM, "Title": title})
+
+        assert result.status == DeliveryStatus.SUCCESS
+        embed = mock_post.call_args.kwargs["json"]["embeds"][0]
+        assert len(embed["title"]) == 256
+        assert embed["title"] == "A" * 255 + "\u2026"
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_title_at_limit_is_untouched(self, mock_post):
+        mock_post.return_value = self._ok()
+        title = "B" * 256
+
+        self._discord().send_embed_message({**self.ITEM, "Title": title})
+
+        assert mock_post.call_args.kwargs["json"]["embeds"][0]["title"] == title
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_long_field_values_are_truncated(self, mock_post):
+        mock_post.return_value = self._ok()
+
+        self._discord().send_embed_message(
+            {**self.ITEM, "Price": "9" * 2000, "Website": "w" * 1024}
+        )
+
+        fields = {
+            f["name"]: f["value"]
+            for f in mock_post.call_args.kwargs["json"]["embeds"][0]["fields"]
+        }
+        assert len(fields["Price"]) == 1024
+        assert fields["Price"].endswith("\u2026")
+        assert fields["Website"] == "w" * 1024
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_urls_are_never_truncated(self, mock_post):
+        mock_post.return_value = self._ok()
+        url = "https://test.com/" + "x" * 3000
+        image = "https://test.com/" + "y" * 3000
+
+        self._discord().send_embed_message({**self.ITEM, "URL": url, "Image": image})
+
+        embed = mock_post.call_args.kwargs["json"]["embeds"][0]
+        assert embed["url"] == url
+        assert embed["thumbnail"]["url"] == image
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_embed_total_is_kept_within_6000_characters(self, mock_post):
+        mock_post.return_value = self._ok()
+
+        self._discord().send_embed_message(
+            {
+                **self.ITEM,
+                "Title": "T" * 300,
+                "Price": "p" * 2000,
+                "Stock": "s" * 2000,
+                "Website": "w" * 2000,
+                "Release": "r" * 2000,
+            }
+        )
+
+        embed = mock_post.call_args.kwargs["json"]["embeds"][0]
+        total = len(embed["title"]) + len(embed["footer"]["text"])
+        total += sum(len(f["name"]) + len(f["value"]) for f in embed["fields"])
+        assert total <= 6000
+        assert len(embed["title"]) <= 256
+        assert all(len(f["value"]) <= 1024 for f in embed["fields"])
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_content_is_truncated_to_2000(self, mock_post):
+        mock_post.return_value = self._ok()
+
+        self._discord().send_message("m" * 2500)
+
+        content = mock_post.call_args.kwargs["json"]["content"]
+        assert len(content) == 2000
+        assert content.endswith("\u2026")
+
+    @patch("messenger.discord.Discord.send_post")
     def test_send_message_after_embed_does_not_resend_embeds(self, mock_post):
         mock_post.return_value = self._ok()
         discord = self._discord()
@@ -574,6 +655,59 @@ class TestTelegramEmbed:
             "(https://example.com/a_(b%29)"
         )
         assert "*Website:* my\\_shop" in lines
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_long_title_is_truncated_to_fit(self, mock_get, telegram):
+        # Every character needs escaping, so the escaped title is twice as long.
+        title = "_" * 3000
+        url = "https://example.com/" + "u" * 100
+
+        telegram.send_embed_message(self._item(Title=title, URL=url))
+
+        text = mock_get.call_args.kwargs["params"]["text"]
+        assert len(text) <= 4096
+        link = text.splitlines()[0]
+        assert link.endswith(f"\u2026]({url})")
+        # Truncated before escaping, so no escape sequence is split.
+        label = link[1 : -len(f"]({url})")]
+        body = label[:-1]
+        assert len(body) % 2 == 0
+        assert body == "\\_" * (len(body) // 2)
+        assert text.splitlines()[1:] == [
+            "*Price:* £14.99",
+            "*Stock:* In Stock",
+            "*Website:* example.com",
+        ]
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_long_message_fits_with_long_values(self, mock_get, telegram):
+        telegram.send_embed_message(
+            self._item(
+                Title="*" * 4000,
+                Price="_" * 4000,
+                Stock="s" * 4000,
+                Website="w" * 4000,
+                Release="r" * 4000,
+            )
+        )
+        text = mock_get.call_args.kwargs["params"]["text"]
+        assert len(text) <= 4096
+        assert text.startswith("[\\*")
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_short_title_is_not_truncated(self, mock_get, telegram):
+        telegram.send_embed_message(self._item(Title="x" * 300))
+        link = mock_get.call_args.kwargs["params"]["text"].splitlines()[0]
+        assert link == f"[{'x' * 300}](https://example.com/mario)"
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_url_too_long_to_link_falls_back_to_plain_title(self, mock_get, telegram):
+        telegram.send_embed_message(
+            self._item(Title="Mario", URL="https://example.com/" + "u" * 5000)
+        )
+        text = mock_get.call_args.kwargs["params"]["text"]
+        assert len(text) <= 4096
+        assert text.splitlines()[0] == "*Mario*"
 
     @patch("messenger.telegram.Telegram.send_get")
     def test_inactive_sends_nothing(self, mock_get):

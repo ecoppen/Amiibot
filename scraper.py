@@ -118,8 +118,14 @@ class Scraper:
         stockist_results: list[StockistResult] = []
 
         for stockist in self.stockists.all_stockists:
+            result: StockistResult | None = None
             try:
                 result = self._process_stockist(stockist)
+            # Deliberate safety boundary: one stockist's failure (a database
+            # error, bad data, ...) must not abort the run for the others.
+            except Exception as e:  # safety boundary: isolate per-stockist failures
+                log.exception(f"Unexpected error processing {stockist.name}")
+                result = self._record_unexpected_failure(stockist, e)
             finally:
                 # Always flush, even if the scrape failed or returned nothing, so
                 # events queued by earlier runs still get retried.
@@ -139,6 +145,22 @@ class Scraper:
             failed=failed,
             notifications_sent=notifications_sent,
             stockist_results=stockist_results,
+        )
+
+    def _record_unexpected_failure(
+        self, stockist: Any, error: Exception
+    ) -> StockistResult:
+        """Record a failure that escaped _process_stockist, never raising."""
+        failure_count = 0
+        try:
+            failure_count = self.database.record_scraping_failure(stockist.name)
+        except Exception:  # the failure handler itself must never abort the cycle
+            log.exception(f"Could not record scraping failure for {stockist.name}")
+        return StockistResult(
+            name=stockist.name,
+            success=False,
+            consecutive_failures=failure_count,
+            error=str(error),
         )
 
     def _process_stockist(self, stockist: Any) -> StockistResult | None:

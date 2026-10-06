@@ -211,6 +211,96 @@ class TestScraper:
         mock_database.record_scraping_failure.assert_called_once_with("test.com")
         mock_database.record_scrape_attempt.assert_called_once()
 
+    @staticmethod
+    def _three_stockists(messenger):
+        stockists = []
+        for name in ("a.com", "b.com", "c.com"):
+            stockist = Mock()
+            stockist.name = name
+            stockist.messengers = [messenger.name]
+            stockist.get_amiibo.return_value = [
+                _scrape_item(url=f"https://{name}/1") | {"Website": name}
+            ]
+            stockists.append(stockist)
+        manager = Mock()
+        manager.all_stockists = stockists
+        manager.messengers = Mock()
+        manager.messengers.all_messengers = [messenger]
+        return manager
+
+    def test_one_stockist_failing_does_not_abort_the_run(
+        self, mock_config, mock_database, mock_messenger
+    ):
+        manager = self._three_stockists(mock_messenger)
+        scraper = Scraper(config=mock_config, stockists=manager, database=mock_database)
+
+        def check(items, skip_delisting=False):
+            if items[0].get("Website", items[0]["URL"]).startswith("b.com"):
+                raise RuntimeError("db exploded")
+            return [items[0]]
+
+        mock_database.check_then_add_or_update_amiibo.side_effect = check
+        pending = {
+            name: [
+                _outbox_row(
+                    _scrape_item(url=f"https://{name}/1") | {"Website": name},
+                    row_id=i,
+                )
+            ]
+            for i, name in enumerate(("a.com", "b.com", "c.com"), start=1)
+        }
+        mock_database.get_pending_outbox.side_effect = lambda name: pending[name]
+        mock_database.record_scraping_failure.return_value = 6
+        mock_database.get_failure_alert_state.side_effect = lambda name: (
+            (6, None) if name == "b.com" else (0, None)
+        )
+        mock_messenger.send_message.return_value = DeliveryResult(
+            status=DeliveryStatus.SUCCESS, messenger_name="test_messenger"
+        )
+
+        with patch("time.sleep"):
+            result = scraper.scrape()
+
+        assert result.status == RunStatus.PARTIAL
+        assert result.exit_code == 2
+        assert result.stockists_attempted == 3
+        assert result.stockists_succeeded == 2
+        assert result.stockists_failed == 1
+        assert len(result.errors) == 1
+        assert result.errors[0].startswith("b.com: db exploded")
+        assert mock_database.check_then_add_or_update_amiibo.call_count == 3
+        mock_database.record_scraping_failure.assert_called_once_with("b.com")
+        # Every stockist is flushed, including the one that failed.
+        flushed = [c.args[0] for c in mock_database.get_pending_outbox.call_args_list]
+        assert flushed == ["a.com", "b.com", "c.com"]
+        assert result.notifications_sent == 3
+        # The failed stockist still gets its health notification.
+        mock_database.mark_failure_alert_sent.assert_called_once_with("b.com")
+        mock_messenger.send_message.assert_called_once()
+        assert "b.com has failed 6 runs" in mock_messenger.send_message.call_args[0][0]
+
+    def test_failure_recording_error_does_not_escape_the_handler(
+        self, mock_config, mock_database, mock_messenger
+    ):
+        manager = self._three_stockists(mock_messenger)
+        scraper = Scraper(config=mock_config, stockists=manager, database=mock_database)
+        mock_database.check_then_add_or_update_amiibo.side_effect = [
+            [],
+            ValueError("Could not extract price from: Price TBC"),
+            [],
+        ]
+        mock_database.record_scraping_failure.side_effect = RuntimeError("db down")
+
+        cycle = scraper.scrape_cycle()
+
+        assert cycle.succeeded == 2
+        assert cycle.failed == 1
+        failed = [r for r in cycle.stockist_results if not r.success]
+        assert [r.name for r in failed] == ["b.com"]
+        assert failed[0].error == "Could not extract price from: Price TBC"
+        assert failed[0].consecutive_failures == 0
+        assert mock_database.get_pending_outbox.call_count == 3
+
     def test_scrape_cycle_empty_items_tracks_failure(self, scraper, mock_database):
         result = scraper.scrape_cycle()
         assert result.failed == 1

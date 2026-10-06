@@ -4,6 +4,7 @@ Unit tests for database module.
 
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import sqlalchemy as sa
@@ -850,15 +851,93 @@ class TestOutboxChangeDetection:
             [_datum("https://t.com/1", stock="Out of Stock"), _datum("https://t.com/2")]
         )
         before = len(self._outbox(database))
-        with pytest.raises(ValueError):
+        with (
+            patch.object(
+                database, "_handle_price_change", side_effect=RuntimeError("boom")
+            ),
+            pytest.raises(RuntimeError),
+        ):
             database.check_then_add_or_update_amiibo(
                 [
                     _datum("https://t.com/1", stock="In stock"),
-                    _datum("https://t.com/2", price="not a price"),
+                    _datum("https://t.com/2", price="$24.99"),
                 ]
             )
         assert len(self._outbox(database)) == before
         assert self._item(database, "https://t.com/1").Stock == "Out of Stock"
+
+    def test_unparsable_price_does_not_abort_other_items(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1", stock="Out of Stock"), _datum("https://t.com/2")]
+        )
+        events = database.check_then_add_or_update_amiibo(
+            [
+                _datum("https://t.com/1", stock="In stock"),
+                _datum("https://t.com/2", price="Price TBC"),
+            ]
+        )
+        assert sorted(e["Stock"] for e in events) == ["In stock", "Price change"]
+        assert self._item(database, "https://t.com/2").Price == "Price TBC"
+
+    def test_unparsable_price_unchanged_emits_nothing(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="Price TBC")])
+        assert (
+            database.check_then_add_or_update_amiibo([_datum(price="Price TBC")]) == []
+        )
+        assert (
+            database.check_then_add_or_update_amiibo([_datum(price="Price  TBC ")])
+            == []
+        )
+        assert len(self._outbox(database)) == 1
+
+    def test_unparsable_to_parsable_price_is_a_price_change(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="Price TBC")])
+        events = database.check_then_add_or_update_amiibo([_datum(price="£14.99")])
+        assert [e["Stock"] for e in events] == ["Price change"]
+        assert events[0]["Price"] == "£14.99"
+        assert self._item(database).Price == "£14.99"
+
+    def test_parsable_to_unparsable_price_is_a_price_change(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="£14.99")])
+        events = database.check_then_add_or_update_amiibo([_datum(price="Price TBC")])
+        assert [e["Stock"] for e in events] == ["Price change"]
+
+    def test_formatting_only_price_difference_emits_nothing(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="£14.99")])
+        assert database.check_then_add_or_update_amiibo([_datum(price="£14.99 ")]) == []
+        assert len(self._outbox(database)) == 1
+
+    def test_stock_change_with_unparsable_price_works(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", price="Price TBC")]
+        )
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="In stock", price="Price TBC")]
+        )
+        assert [e["Stock"] for e in events] == ["In stock"]
+        self._expire_cooldown(database)
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", price="£14.99")]
+        )
+        assert [e["Stock"] for e in events] == ["Out of Stock"]
+        assert self._item(database).Price == "£14.99"
+
+    @pytest.mark.parametrize(
+        ("old", "new", "differ"),
+        [
+            ("£14.99", "£14.99", False),
+            ("£14.99", "£14.99 ", False),
+            ("$19.99", "£19.99", False),
+            ("£14.99", "£15.99", True),
+            ("Price TBC", "Price TBC", False),
+            ("Price TBC", " Price   TBC ", False),
+            ("Price TBC", "£14.99", True),
+            ("£14.99", "Price TBC", True),
+            ("Price TBC", "Sold out", True),
+        ],
+    )
+    def test_prices_differ(self, database, old, new, differ):
+        assert database._prices_differ(old, new) is differ
 
 
 _NAIVE = datetime(2026, 1, 1)  # noqa: DTZ001 - deliberately naive

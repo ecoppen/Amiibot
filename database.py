@@ -484,6 +484,20 @@ class Database:
         except ValueError:
             raise ValueError(f"Could not extract price from: {currency_string}")
 
+    def _prices_differ(self, old: str, new: str) -> bool:
+        """Return True if two price strings represent different prices.
+
+        Compares numerically when both parse, so formatting-only changes (extra
+        whitespace, currency symbols) are ignored. If either cannot be parsed
+        (e.g. "Price TBC"), falls back to comparing the whitespace-normalised
+        strings, so one odd price never aborts the whole update.
+        """
+        try:
+            return self.remove_currency(old) != self.remove_currency(new)
+        except ValueError:
+            log.debug(f"Could not parse price(s) {old!r} / {new!r}; comparing as text")
+            return " ".join(str(old).split()) != " ".join(str(new).split())
+
     def record_scrape_attempt(self, stockist: str) -> None:
         with self.Session() as session:
             existing = session.query(LastScraped).filter_by(stockist=stockist).first()
@@ -751,7 +765,7 @@ class Database:
         )
         item.Stock = new_datum["Stock"]
         item.Colour = new_datum["Colour"]
-        if self.remove_currency(new_datum["Price"]) != self.remove_currency(item.Price):
+        if self._prices_differ(item.Price, new_datum["Price"]):
             item.Price = new_datum["Price"]
         event = {
             "Colour": new_datum["Colour"],
@@ -879,9 +893,7 @@ class Database:
                             event = self._handle_stock_change(session, item, new_datum)
                         elif new_datum["Stock"] != item.Stock:
                             event = self._handle_stock_change(session, item, new_datum)
-                        elif self.remove_currency(
-                            new_datum["Price"]
-                        ) != self.remove_currency(item.Price):
+                        elif self._prices_differ(item.Price, new_datum["Price"]):
                             event = self._handle_price_change(
                                 session, item, new_datum["Price"]
                             )
