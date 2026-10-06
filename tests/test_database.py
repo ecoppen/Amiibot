@@ -1353,9 +1353,8 @@ class TestScrapingFailureMigration:
         assert "alert_sent_at" in self._columns(database)
         assert database.get_failure_alert_state("w") == (4, None)
 
-    def test_helper_skips_missing_table(self):
-        from unittest.mock import Mock
-
-        conn = Mock()
-        Database._add_missing_scraping_failure_columns(conn, [])
-        conn.execute.assert_not_called()
+    def test_migrations_skip_missing_table(self, database):
+        with database.engine.begin() as conn:
+            conn.execute(sa.text("DROP TABLE scraping_failures"))
+        database._run_migrations()
+        assert not sa.inspect(database.engine).has_table("scraping_failures")

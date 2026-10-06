@@ -25,22 +25,43 @@ OUTBOX_PENDING = "pending"
 OUTBOX_DONE = "done"
 OUTBOX_EXPIRED = "expired"
 
-# Columns added to notification_outbox after its original creation. Each entry
-# is (column name, DDL type and default), valid for both sqlite and postgres.
-_OUTBOX_MIGRATION_COLUMNS: list[tuple[str, str]] = [
-    ("price", "VARCHAR DEFAULT ''"),
-    ("image", "VARCHAR DEFAULT ''"),
-    ("colour", "INTEGER DEFAULT 0"),
-    ("status", "VARCHAR DEFAULT 'pending'"),
-    ("attempts", "INTEGER DEFAULT 0"),
-    ("last_attempt_at", "TIMESTAMP"),
-    ("completed_at", "TIMESTAMP"),
-    ("release_date", "VARCHAR"),
+# Dialect-specific fragments used in the migration DDL below. A "{name}"
+# placeholder in a DDL string is replaced with the entry for the engine in use.
+_DIALECT_DDL: dict[str, dict[str, str]] = {
+    "sqlite": {"true": "1", "now_utc": "CURRENT_TIMESTAMP"},
+    "postgres": {"true": "true", "now_utc": "(NOW() AT TIME ZONE 'UTC')"},
+}
+
+# Columns added to existing tables after their original creation, as
+# (table, column, DDL type and default). Applied in order, only when missing.
+_MIGRATION_ADDITIONS: list[tuple[str, str, str]] = [
+    ("amiibo_stock", "missed_count", "INTEGER DEFAULT 0"),
+    ("amiibo_stock", "last_notified_at", "TIMESTAMP"),
+    ("amiibo_stock", "last_notified_status", "VARCHAR"),
+    ("amiibo_stock", "is_active", "BOOLEAN DEFAULT {true}"),
+    ("amiibo_stock", "delisted_at", "TIMESTAMP"),
+    ("amiibo_stock", "first_seen_at", "TIMESTAMP"),
+    ("last_scraped", "last_attempt_at", "TIMESTAMP DEFAULT {now_utc}"),
+    ("last_scraped", "last_healthy_count", "INTEGER DEFAULT 0"),
+    ("last_scraped", "last_success_at", "TIMESTAMP"),
+    ("last_scraped", "consecutive_unhealthy_obs", "INTEGER DEFAULT 0"),
+    ("notification_outbox", "price", "VARCHAR DEFAULT ''"),
+    ("notification_outbox", "image", "VARCHAR DEFAULT ''"),
+    ("notification_outbox", "colour", "INTEGER DEFAULT 0"),
+    ("notification_outbox", "status", "VARCHAR DEFAULT 'pending'"),
+    ("notification_outbox", "attempts", "INTEGER DEFAULT 0"),
+    ("notification_outbox", "last_attempt_at", "TIMESTAMP"),
+    ("notification_outbox", "completed_at", "TIMESTAMP"),
+    ("notification_outbox", "release_date", "VARCHAR"),
+    ("scraping_failures", "alert_sent_at", "TIMESTAMP"),
 ]
 
-# Columns added to scraping_failures after its original creation.
-_SCRAPING_FAILURE_MIGRATION_COLUMNS: list[tuple[str, str]] = [
-    ("alert_sent_at", "TIMESTAMP"),
+# Columns renamed after the table was first created, as (table, old, new).
+# Applied before the additions, and only when the old column exists and the new
+# one does not, so the data in the old column is kept.
+_MIGRATION_RENAMES: list[tuple[str, str, str]] = [
+    ("last_scraped", "timestamp", "last_attempt_at"),
+    ("last_scraped", "item_count", "last_healthy_count"),
 ]
 
 
@@ -209,220 +230,38 @@ class Database:
         log.info("database schema ensured")
 
     def _run_migrations(self) -> None:
-        if self._engine_type == "sqlite":
-            with self.engine.connect() as conn:
-                result = conn.execute(db.text("PRAGMA table_info(amiibo_stock)"))
-                amiibo_cols = [row[1] for row in result]
-                if "missed_count" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN missed_count INTEGER DEFAULT 0"
-                        )
-                    )
-                if "last_notified_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_at TIMESTAMP"
-                        )
-                    )
-                if "last_notified_status" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
-                        )
-                    )
-                if "is_active" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN is_active BOOLEAN DEFAULT 1"
-                        )
-                    )
-                if "delisted_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN delisted_at TIMESTAMP"
-                        )
-                    )
-                if "first_seen_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN first_seen_at TIMESTAMP"
-                        )
-                    )
-                result = conn.execute(db.text("PRAGMA table_info(last_scraped)"))
-                scraped_cols = [row[1] for row in result]
-                if "last_attempt_at" not in scraped_cols:
-                    if "timestamp" in scraped_cols:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped RENAME COLUMN timestamp TO last_attempt_at"
-                            )
-                        )
-                    else:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                            )
-                        )
-                if "last_healthy_count" not in scraped_cols:
-                    if "item_count" in scraped_cols:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped RENAME COLUMN item_count TO last_healthy_count"
-                            )
-                        )
-                    else:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped ADD COLUMN last_healthy_count INTEGER DEFAULT 0"
-                            )
-                        )
-                if "last_success_at" not in scraped_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN last_success_at TIMESTAMP"
-                        )
-                    )
-                if "consecutive_unhealthy_obs" not in scraped_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
-                        )
-                    )
-                result = conn.execute(db.text("PRAGMA table_info(notification_outbox)"))
-                self._add_missing_outbox_columns(conn, [row[1] for row in result])
-                result = conn.execute(db.text("PRAGMA table_info(scraping_failures)"))
-                self._add_missing_scraping_failure_columns(
-                    conn, [row[1] for row in result]
-                )
-                conn.commit()
-        elif self._engine_type == "postgres":
-            with self.engine.connect() as conn:
-                result = conn.execute(
-                    db.text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'amiibo_stock'"
-                    )
-                )
-                amiibo_cols = [row[0] for row in result]
-                if "missed_count" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN missed_count INTEGER DEFAULT 0"
-                        )
-                    )
-                if "last_notified_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_at TIMESTAMP"
-                        )
-                    )
-                if "last_notified_status" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN last_notified_status VARCHAR"
-                        )
-                    )
-                if "is_active" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN is_active BOOLEAN DEFAULT true"
-                        )
-                    )
-                if "delisted_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN delisted_at TIMESTAMP"
-                        )
-                    )
-                if "first_seen_at" not in amiibo_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE amiibo_stock ADD COLUMN first_seen_at TIMESTAMP"
-                        )
-                    )
-                result = conn.execute(
-                    db.text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'last_scraped'"
-                    )
-                )
-                scraped_cols = [row[0] for row in result]
-                if "last_attempt_at" not in scraped_cols:
-                    if "timestamp" in scraped_cols:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped RENAME COLUMN timestamp TO last_attempt_at"
-                            )
-                        )
-                    else:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC')"
-                            )
-                        )
-                if "last_healthy_count" not in scraped_cols:
-                    if "item_count" in scraped_cols:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped RENAME COLUMN item_count TO last_healthy_count"
-                            )
-                        )
-                    else:
-                        conn.execute(
-                            db.text(
-                                "ALTER TABLE last_scraped ADD COLUMN last_healthy_count INTEGER DEFAULT 0"
-                            )
-                        )
-                if "last_success_at" not in scraped_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN last_success_at TIMESTAMP"
-                        )
-                    )
-                if "consecutive_unhealthy_obs" not in scraped_cols:
-                    conn.execute(
-                        db.text(
-                            "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
-                        )
-                    )
-                result = conn.execute(
-                    db.text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'notification_outbox'"
-                    )
-                )
-                self._add_missing_outbox_columns(conn, [row[0] for row in result])
-                result = conn.execute(
-                    db.text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'scraping_failures'"
-                    )
-                )
-                self._add_missing_scraping_failure_columns(
-                    conn, [row[0] for row in result]
-                )
-                conn.commit()
+        """Bring tables created by older versions up to the current schema.
 
-    @staticmethod
-    def _add_missing_outbox_columns(conn: Any, existing_cols: list[str]) -> None:
-        """Add columns introduced after notification_outbox was first created."""
-        if not existing_cols:
-            return
-        for name, ddl in _OUTBOX_MIGRATION_COLUMNS:
-            if name not in existing_cols:
-                conn.execute(
-                    db.text(f"ALTER TABLE notification_outbox ADD COLUMN {name} {ddl}")
-                )
-
-    @staticmethod
-    def _add_missing_scraping_failure_columns(
-        conn: Any, existing_cols: list[str]
-    ) -> None:
-        """Add columns introduced after scraping_failures was first created."""
-        if not existing_cols:
-            return
-        for name, ddl in _SCRAPING_FAILURE_MIGRATION_COLUMNS:
-            if name not in existing_cols:
-                conn.execute(
-                    db.text(f"ALTER TABLE scraping_failures ADD COLUMN {name} {ddl}")
-                )
+        Idempotent. Tables that do not exist are skipped. Existing columns are
+        read with the SQLAlchemy inspector, so this works the same on sqlite
+        and Postgres; only the DDL fragments differ (see _DIALECT_DDL).
+        """
+        fragments = _DIALECT_DDL[self._engine_type]
+        tables = dict.fromkeys(t for t, _, _ in _MIGRATION_ADDITIONS)
+        with self.engine.begin() as conn:
+            inspector = db.inspect(conn)
+            for table in tables:
+                if not inspector.has_table(table):
+                    continue
+                existing = {col["name"] for col in inspector.get_columns(table)}
+                for tbl, old, new in _MIGRATION_RENAMES:
+                    if tbl == table and old in existing and new not in existing:
+                        conn.execute(
+                            db.text(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
+                        )
+                        existing.discard(old)
+                        existing.add(new)
+                for tbl, column, ddl in _MIGRATION_ADDITIONS:
+                    if tbl != table:
+                        continue
+                    if column not in existing:
+                        conn.execute(
+                            db.text(
+                                f"ALTER TABLE {table} ADD COLUMN {column} "
+                                + ddl.format(**fragments)
+                            )
+                        )
+                        existing.add(column)
 
     def remove_currency(self, currency_string: str) -> float:
         """Extract numeric price from currency string.
