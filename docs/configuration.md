@@ -1,378 +1,122 @@
-# Configuration Guide
+# Configuration
 
-Complete reference for all Amiibot configuration options.
+Everything lives in `config/config.json`, relative to the directory you run Amiibot from. The file is validated when the script starts, and unknown keys are rejected, so a typo in a field name is an error rather than being silently ignored. There are two top-level keys: `database` and `messengers`.
 
----
+## Database
 
-## Configuration File Structure
-
-Amiibot uses a JSON configuration file located at `config/config.json`. The configuration is validated using Pydantic for type safety and clear error messages.
+SQLite is the default and is all most people need:
 
 ```json
-{
-  "database": { ... },
-  "messengers": { ... }
+"database": { "engine": "sqlite", "name": "amiibot" }
+```
+
+This creates `amiibot.db` in the current directory. `name` is the filename without `.db`. If you leave it out it defaults to `amiiboalert`, which is a leftover from the project's earlier name, so set it explicitly.
+
+For Postgres:
+
+```json
+"database": {
+  "engine": "postgres",
+  "username": "amiibot",
+  "password": "change-me",
+  "host": "127.0.0.1",
+  "port": 5432,
+  "name": "amiibot"
 }
 ```
 
----
-
-## Database Configuration
-
-### SQLite (Default)
-
-Perfect for personal use and getting started.
-
-```json
-{
-  "database": {
-    "engine": "sqlite",
-    "name": "amiibot"
-  }
-}
-```
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `engine` | string | Yes | `"sqlite"` | Database engine type |
-| `name` | string | Yes | `"amiibot"` | Database file name (without .db extension) |
-
----
-
-### PostgreSQL
-
-Recommended for production and multi-instance deployments.
-
-```json
-{
-  "database": {
-    "engine": "postgres",
-    "username": "amiibot_user",
-    "password": "secure_password",
-    "host": "localhost",
-    "port": 5432,
-    "name": "amiibot"
-  }
-}
-```
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `engine` | string | Yes | - | Must be `"postgres"` |
-| `username` | string | Yes | - | PostgreSQL username |
-| `password` | string | Yes | - | PostgreSQL password |
-| `host` | string | No | `"127.0.0.1"` | PostgreSQL server IP/hostname |
-| `port` | integer | No | `5432` | PostgreSQL server port (1-65535) |
-| `name` | string | Yes | `"amiibot"` | Database name |
-
-**Advantages:**
-- Better for production
-- Supports multiple instances
-- Better concurrent access
-- Advanced features
-
-**Setup:**
+`host` defaults to `127.0.0.1` and `port` to `5432`. The user needs to own (or at least be able to create and alter tables in) the database, since Amiibot creates and upgrades its own tables on startup:
 
 ```bash
-# Install PostgreSQL
-sudo apt install postgresql postgresql-contrib
-
-# Create database
-sudo -u postgres createdb amiibot
-
-# Create user
-sudo -u postgres psql
-CREATE USER amiibot_user WITH PASSWORD 'secure_password';
-GRANT ALL PRIVILEGES ON DATABASE amiibot TO amiibot_user;
-\q
+sudo -u postgres createuser --pwprompt amiibot
+sudo -u postgres createdb --owner amiibot amiibot
 ```
 
----
+You can keep the password out of the file with the `DATABASE_PASSWORD` environment variable.
 
-## Messenger Configuration
+## Messengers
 
-You can configure multiple messengers with different stockist lists. Each messenger must have a unique name.
+`messengers` is an object where each key is a name you choose and each value is a Discord or Telegram messenger. You can have as many as you like, each watching a different set of shops.
 
-### Discord Webhook
+### Discord
 
 ```json
-{
-  "messengers": {
-    "discord_us": {
-      "messenger_type": "discord",
-      "webhook_url": "https://discord.com/api/webhooks/123456/abcdef",
-      "active": true,
-      "embedded_messages": true,
-      "stockists": ["bestbuy.com", "gamestop.com"]
-    }
-  }
+"uk_alerts": {
+  "messenger_type": "discord",
+  "webhook_url": "https://discord.com/api/webhooks/123456789/your-token",
+  "active": true,
+  "stockists": ["nintendo.co.uk", "game.co.uk", "shopto.net"]
 }
 ```
 
-**Parameters:**
+The webhook URL has to be an `https://discord.com/api/webhooks/<numeric id>/<token>` (or `discordapp.com`) URL. To make one, open the channel's settings in Discord, go to Integrations, then Webhooks, and create a new webhook. Each alert is posted as an embed with the product name, link, thumbnail, price, stock status and shop.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `messenger_type` | string | Yes | - | Must be `"discord"` |
-| `webhook_url` | URL | Yes | - | Discord webhook URL |
-| `active` | boolean | Yes | `false` | Enable/disable notifications |
-| `embedded_messages` | boolean | Yes | `true` | Use rich embeds (recommended) |
-| `stockists` | array | Yes | - | List of stockist URLs to track |
-
-**Getting a Discord Webhook:**
-
-1. Open Discord and go to your server
-2. Right-click the channel → Edit Channel
-3. Go to Integrations → Webhooks
-4. Click "New Webhook" or "Create Webhook"
-5. Give it a name and avatar (optional)
-6. Copy the webhook URL
-
-!!! note "Multiple Discord Webhooks"
-    You can create multiple webhooks for different channels:
-
-    ```json
-    {
-      "messengers": {
-        "discord_us": {
-          "messenger_type": "discord",
-          "webhook_url": "https://discord.com/api/webhooks/111/aaa",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["bestbuy.com"]
-        },
-        "discord_uk": {
-          "messenger_type": "discord",
-          "webhook_url": "https://discord.com/api/webhooks/222/bbb",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["nintendo.co.uk"]
-        }
-      }
-    }
-    ```
-
----
-
-### Telegram Bot
+### Telegram
 
 ```json
-{
-  "messengers": {
-    "telegram_main": {
-      "messenger_type": "telegram",
-      "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-      "chat_id": "123456789",
-      "active": true,
-      "embedded_messages": true,
-      "stockists": ["nintendo.co.uk", "game.co.uk"]
-    }
-  }
+"telegram_alerts": {
+  "messenger_type": "telegram",
+  "bot_token": "123456789:AAExampleTokenFromBotFatherxxxxxxxxx",
+  "chat_id": "987654321",
+  "active": true,
+  "stockists": ["nintendo.co.uk"]
 }
 ```
 
-**Parameters:**
+Create a bot by messaging @BotFather and sending `/newbot`. Your chat ID is the number @userinfobot replies with; for a group it's negative. Send your bot `/start` once so it's allowed to message you. The token has to look like a real one (8 to 12 digits, a colon, then 30 to 50 letters, digits, underscores or hyphens) or validation fails.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `messenger_type` | string | Yes | - | Must be `"telegram"` |
-| `bot_token` | string | Yes | - | Telegram bot API token |
-| `chat_id` | string | Yes | - | Telegram chat ID |
-| `active` | boolean | Yes | `false` | Enable/disable notifications |
-| `embedded_messages` | boolean | Yes | `true` | Use formatted messages |
-| `stockists` | array | Yes | - | List of stockist URLs to track |
+!!! warning "Telegram alerts aren't delivered yet"
+    The scraper sends alerts through each messenger's `send_embed_message`, and the Telegram messenger only implements `send_message`. At the moment a Telegram messenger passes validation and starts up, but every alert for it is skipped as if it were inactive. Discord is the only messenger that currently delivers alerts.
 
-**Setting up a Telegram Bot:**
+### Common fields
 
-1. **Create Bot:**
-   - Open Telegram and search for @BotFather
-   - Send `/newbot`
-   - Follow the instructions to choose a name and username
-   - Copy the bot token
+| Field | Default | Notes |
+|-------|---------|-------|
+| `messenger_type` | none | `discord` or `telegram`. |
+| `active` | `false` | Set to `true` or the messenger never sends anything. |
+| `stockists` | none | At least one entry from the table below. |
+| `embedded_messages` | `true` | Accepted for compatibility but currently not used by anything. Discord always sends embeds. |
 
-2. **Get Chat ID:**
-   - Send `/start` to @userinfobot
-   - It will respond with your user ID (this is your chat_id)
+An inactive messenger still counts when working out which shops to scrape, so a shop that is only listed under inactive messengers is scraped for no reason.
 
-   **OR** for group chats:
-   - Add your bot to the group
-   - Add @userinfobot to the group
-   - Your chat ID will be shown (starts with -)
+## Stockists
 
-3. **Start conversation:**
-   - Send `/start` to your bot
-   - Now it can send you messages
+| Shop | Value | Country |
+|------|-------|---------|
+| Best Buy | `bestbuy.com` | 🇺🇸 |
+| GameStop | `gamestop.com` | 🇺🇸 |
+| Best Buy Canada | `bestbuy.ca` | 🇨🇦 |
+| The Source | `thesource.ca` | 🇨🇦 |
+| Nintendo UK | `nintendo.co.uk` | 🇬🇧 |
+| GAME | `game.co.uk` | 🇬🇧 |
+| ShopTo | `shopto.net` | 🇬🇧 |
+| CeX | `uk.webuy.com` | 🇬🇧 |
+| Meccha Japan | `meccha-japan.com` | 🇯🇵 |
+| Play-Asia | `play-asia.com` | ships internationally |
 
----
+Adding a shop that isn't in this list means writing a scraper for it: subclass `Stockist` in `stockist/`, register it in `STOCKIST_FACTORY` in `stockist/manager.py`, and add its value to the `Stockist` enum in `config/config.py`.
 
-## Stockists Configuration
+## Environment variables
 
-Each messenger can track different stockists. Available stockists:
+These override the file after it has been validated, so the file still needs values that look valid (a well-formed webhook URL, a token in the right format). They're useful for keeping secrets out of the JSON.
 
-### North America
+| Variable | Effect |
+|----------|--------|
+| `DATABASE_PASSWORD` | Replaces `database.password`. |
+| `DISCORD_WEBHOOK_URL` | Replaces the webhook URL of **every** Discord messenger. |
+| `TELEGRAM_BOT_TOKEN` | Replaces the bot token of every Telegram messenger. |
+| `TELEGRAM_CHAT_ID` | Replaces the chat ID of every Telegram messenger. |
+| `LOGLEVEL` | Log level, `INFO` by default. |
 
-| Stockist | Code | Country |
-|----------|------|---------|
-| Best Buy | `bestbuy.com` | 🇺🇸 USA |
-| GameStop | `gamestop.com` | 🇺🇸 USA |
-| Best Buy CA | `bestbuy.ca` | 🇨🇦 Canada |
-| The Source | `thesource.ca` | 🇨🇦 Canada |
+The Discord one catches people out. If you have two Discord messengers pointing at different channels and set `DISCORD_WEBHOOK_URL`, both end up posting to that one webhook. Use it only if you have a single Discord messenger.
 
-### Europe
+## Validation errors
 
-| Stockist | Code | Country |
-|----------|------|---------|
-| Nintendo UK | `nintendo.co.uk` | 🇬🇧 UK |
-| GAME | `game.co.uk` | 🇬🇧 UK |
-| ShopTo | `shopto.net` | 🇬🇧 UK |
-| CeX | `uk.webuy.com` | 🇬🇧 UK |
-
-### Asia
-
-| Stockist | Code | Country |
-|----------|------|---------|
-| Play-Asia | `play-asia.com` | 🌏 Asia |
-| Meccha Japan | `meccha-japan.com` | 🇯🇵 Japan |
-
-**Example Configuration:**
-
-```json
-{
-  "messengers": {
-    "all_regions": {
-      "messenger_type": "discord",
-      "webhook_url": "YOUR_WEBHOOK_URL",
-      "active": true,
-      "embedded_messages": true,
-      "stockists": [
-        "bestbuy.com",
-        "gamestop.com",
-        "nintendo.co.uk",
-        "game.co.uk",
-        "play-asia.com"
-      ]
-    }
-  }
-}
-```
-
-!!! warning "Stockist List Validation"
-    The stockists list must contain at least one valid stockist URL. The configuration will fail validation if the list is empty or contains invalid URLs.
-
----
-
-## Complete Example
-
-Here's a complete configuration example with multiple messengers and databases:
-
-=== "Production (PostgreSQL + Multiple Messengers)"
-
-    ```json
-    {
-      "database": {
-        "engine": "postgres",
-        "username": "amiibot_user",
-        "password": "secure_password_here",
-        "host": "localhost",
-        "port": 5432,
-        "name": "amiibot"
-      },
-      "messengers": {
-        "discord_us_general": {
-          "messenger_type": "discord",
-          "webhook_url": "https://discord.com/api/webhooks/111/aaa",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["bestbuy.com", "gamestop.com"]
-        },
-        "discord_uk_general": {
-          "messenger_type": "discord",
-          "webhook_url": "https://discord.com/api/webhooks/222/bbb",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["nintendo.co.uk", "game.co.uk", "shopto.net"]
-        },
-        "telegram_alerts": {
-          "messenger_type": "telegram",
-          "bot_token": "123456:ABC-DEF",
-          "chat_id": "987654321",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["play-asia.com", "meccha-japan.com"]
-        }
-      }
-    }
-    ```
-
-=== "Development (SQLite + Single Messenger)"
-
-    ```json
-    {
-      "database": {
-        "engine": "sqlite",
-        "name": "amiibot_dev"
-      },
-      "messengers": {
-        "discord_test": {
-          "messenger_type": "discord",
-          "webhook_url": "https://discord.com/api/webhooks/TEST/test",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["bestbuy.com"]
-        }
-      }
-    }
-    ```
-
----
-
-## Configuration Validation
-
-Amiibot validates your configuration at startup. Common validation errors:
-
-### Empty Stockists List
+If the config is wrong the script prints the problem and exits with code 1 before scraping anything. Each error ends with the path of the offending field:
 
 ```
 Configuration validation failed:
-  - Discord messenger must have at least one stockist configured at messengers.discord_main.stockists
+  - Value error, Discord messenger must have at least one stockist configured at messengers.uk_alerts.discord.stockists
 ```
 
-**Fix:** Add at least one stockist to the list.
-
-### Invalid Webhook URL
-
-```
-Configuration validation failed:
-  - Invalid Discord webhook URL at messengers.discord_main.webhook_url
-```
-
-**Fix:** Ensure the webhook URL contains `discord.com/api/webhooks/`.
-
-### Missing Required Fields
-
-```
-Configuration validation failed:
-  - Missing required field: bot_token at messengers.telegram_main
-```
-
-**Fix:** Add the missing field to your configuration.
-
----
-
-## Environment Variables
-
-For sensitive data, you can use environment variables (requires code modification):
-
-```python
-import os
-
-config = {
-    "database": {
-        "password": os.getenv("DB_PASSWORD", "default_password")
-    }
-}
-```
+The usual causes are an empty `stockists` list, a stockist value that isn't in the table above, a webhook URL that doesn't match the format described earlier (the placeholder in `config.example.json` is one), a missing `bot_token` or `chat_id`, and invalid JSON such as a trailing comma.

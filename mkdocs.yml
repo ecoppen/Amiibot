@@ -61,10 +61,11 @@ nav:
   - Getting Started: gettingstarted.md
   - User Guide:
       - Configuration: configuration.md
+      - How alerts work: alerts.md
   - Developer Guide:
       - Testing: testing.md
   - Deployment:
-      - Production Setup: deployment.md
+      - Scheduling: deployment.md
       - Troubleshooting: troubleshooting.md
 
 plugins:

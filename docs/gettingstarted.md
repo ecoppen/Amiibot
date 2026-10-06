@@ -1,351 +1,83 @@
-# Getting Started
+# Getting started
 
-Amiibot monitors retailers for Amiibo stock changes and sends notifications via Discord or Telegram.
+Amiibot checks amiibo stock at a set of shops and sends you a message when something changes. It isn't a long-running service. Each time you run it, it scrapes every shop in your config once, queues and sends any alerts, and exits. To keep watching, you run it on a schedule (see [Scheduling](deployment.md)).
 
-## Quick Start
+## What you need
+
+Python 3.13 or newer, [uv](https://docs.astral.sh/uv/), and Chrome or Chromium. Most shops are scraped with plain HTTP requests, but a few fall back to headless Chrome through Selenium when the page needs JavaScript. Postgres is optional; SQLite is fine for home use.
+
+## Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/ecoppen/Amiibot.git
 cd Amiibot
-
-# Install dependencies
 uv sync
+```
 
-# Configure the bot
+`uv sync` creates `.venv` and installs the dependencies. If you'd rather not use uv, create a virtualenv and `pip install` the packages listed under `dependencies` in `pyproject.toml`.
+
+## Configure
+
+```bash
 cp config/config.example.json config/config.json
-# Edit config/config.json with your settings
-
-# Run the bot
-python amiibot.py
 ```
 
----
-
-## Requirements
-
-### Hardware
-
-**Minimum:**
-- 512MB RAM
-- 1GB disk space
-- Network connection
-
-**Recommended:**
-- 1GB+ RAM
-- 5GB+ disk space
-- Stable internet connection
-- 24/7 availability
-
-### Supported Platforms
-
-- Linux (Ubuntu, Debian, CentOS, etc.)
-- macOS (10.15+)
-- Windows (10/11)
-- Raspberry Pi (3B+ or newer)
-
-### Software Requirements
-
-**Required:**
-- Python 3.13 or higher
-- uv (package manager)
-- Chromium (for Selenium)
-
-**Optional:**
-- PostgreSQL (for production)
-- systemd (for service management)
-- cron (for scheduling)
-
----
-
-## Installation
-
-### Method 1: Using uv (Recommended)
-
-uv is the fastest and most reliable way to install Amiibot.
-
-```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone the repository
-git clone https://github.com/ecoppen/Amiibot.git
-cd Amiibot
-
-# Install dependencies
-uv sync
-
-# The virtual environment is automatically created at .venv/
-```
-
-### Method 2: Using pip
-
-```bash
-# Clone the repository
-git clone https://github.com/ecoppen/Amiibot.git
-cd Amiibot
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-source .venv/bin/activate  # Linux/macOS
-# OR
-.venv\Scripts\activate  # Windows
-
-# Install dependencies
-pip install -e .
-```
-
-### Method 3: Development Installation
-
-For contributors and developers:
-
-```bash
-# Clone the repository
-git clone https://github.com/ecoppen/Amiibot.git
-cd Amiibot
-
-# Install with development dependencies
-uv sync --group dev
-
-# Install pre-commit hooks
-pre-commit install
-```
-
----
-
-## Configuration
-
-### Step 1: Create Configuration File
-
-```bash
-cd config
-cp config.example.json config.json
-```
-
-### Step 2: Basic Configuration
-
-Edit `config/config.json` with your favorite editor:
-
-```bash
-nano config/config.json  # or vim, code, etc.
-```
-
-Minimal configuration example:
+The example's webhook URL is a placeholder and will fail validation, so you have to edit it. A minimal config looks like this:
 
 ```json
 {
-  "database": {
-    "engine": "sqlite",
-    "name": "amiibot"
-  },
+  "database": { "engine": "sqlite", "name": "amiibot" },
   "messengers": {
     "my_discord": {
       "messenger_type": "discord",
-      "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_HERE",
+      "webhook_url": "https://discord.com/api/webhooks/123456789/your-token",
       "active": true,
-      "embedded_messages": true,
-      "stockists": ["bestbuy.com", "gamestop.com"]
+      "stockists": ["nintendo.co.uk", "game.co.uk"]
     }
   }
 }
 ```
 
-!!! note "Configuration Validation"
-    Amiibot validates your configuration at startup and will show clear error messages if something is wrong.
+To get a webhook URL, open the channel settings in Discord, go to Integrations, then Webhooks, and create one. Every option, the list of shops and the environment variable overrides are covered in [Configuration](configuration.md).
 
-### Step 3: Database Setup
-
-=== "SQLite (Easiest)"
-
-    No additional setup required! Just specify in config:
-
-    ```json
-    {
-      "database": {
-        "engine": "sqlite",
-        "name": "amiibot"
-      }
-    }
-    ```
-
-=== "PostgreSQL (Production)"
-
-    ```bash
-    # Install PostgreSQL
-    sudo apt install postgresql postgresql-contrib
-
-    # Create database
-    sudo -u postgres createdb amiibot
-
-    # Create user (optional)
-    sudo -u postgres createuser amiibot_user
-    ```
-
-    Configuration:
-
-    ```json
-    {
-      "database": {
-        "engine": "postgres",
-        "username": "amiibot_user",
-        "password": "your_password",
-        "host": "localhost",
-        "port": 5432,
-        "name": "amiibot"
-      }
-    }
-    ```
-
-### Step 4: Messenger Setup
-
-=== "Discord"
-
-    1. Go to your Discord server
-    2. Server Settings → Integrations → Webhooks
-    3. Click "New Webhook"
-    4. Choose a channel and copy the webhook URL
-    5. Add to configuration:
-
-    ```json
-    {
-      "messengers": {
-        "discord_main": {
-          "messenger_type": "discord",
-          "webhook_url": "YOUR_WEBHOOK_URL_HERE",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["bestbuy.com"]
-        }
-      }
-    }
-    ```
-
-=== "Telegram"
-
-    1. Message @BotFather on Telegram
-    2. Send `/newbot` and follow instructions
-    3. Copy the bot token
-    4. Send `/start` to @userinfobot to get your chat ID
-    5. Add to configuration:
-
-    ```json
-    {
-      "messengers": {
-        "telegram_main": {
-          "messenger_type": "telegram",
-          "bot_token": "YOUR_BOT_TOKEN",
-          "chat_id": "YOUR_CHAT_ID",
-          "active": true,
-          "embedded_messages": true,
-          "stockists": ["nintendo.co.uk"]
-        }
-      }
-    }
-    ```
-
-!!! info "Multiple Messengers"
-    You can configure multiple Discord and Telegram messengers with different stockist lists!
-
----
-
-## Running the Bot
-
-### Manual Execution
+## Run it
 
 ```bash
-# Activate virtual environment
-source .venv/bin/activate  # Linux/macOS
-# OR
-.venv\Scripts\activate  # Windows
-
-# Run the bot
-python amiibot.py
+uv run amiibot.py
 ```
 
-You should see output like:
+Run it from the repository directory. The config path, the SQLite file, `log.txt` and the lock file are all relative to the current directory, and running from somewhere else gives you a fresh, empty database (and a flood of "new" alerts).
+
+The first run alerts on every product it finds. After that you only get alerts for changes, as described in [How alerts work](alerts.md). The last line of the output is a summary:
 
 ```
-2026-02-17 10:00:00 - root - INFO - config/config.json loaded
-2026-02-17 10:00:00 - root - INFO - sqlite loaded
-2026-02-17 10:00:00 - root - INFO - database tables loaded
-2026-02-17 10:00:00 - root - INFO - discord_main setup to send messages to Discord
-2026-02-17 10:00:00 - root - INFO - Now tracking bestbuy.com
-2026-02-17 10:00:00 - root - INFO - Now scraping 1 site(s): Best Buy US
-2026-02-17 10:00:00 - root - INFO - Starting scraper...
+Run summary: status=SUCCESS exit=0 stockists=2/2 notifications=0
 ```
 
-### Scheduled Execution (Cron)
+`amiibot_runner.sh` does the same thing from `~/Amiibot` if you want something to point cron at.
 
-For automatic execution every 30 minutes:
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Every stockist was scraped. |
+| 2 | Some stockists failed or returned nothing. The others were still processed. |
+| 3 | The scrape cycle crashed. |
+| 1 | Fatal error: bad config, database problem, or another run holds the lock. |
+| 130 | Interrupted with Ctrl-C. |
+
+## Logs
+
+The console output is human-readable. `log.txt` is JSON lines and rotates at 5MB, keeping five old files. Pass `--log-json` to get JSON on the console as well, and set `LOGLEVEL=DEBUG` for more detail.
 
 ```bash
-# Edit crontab
-crontab -e
-
-# Add this line
-*/30 * * * * cd /path/to/Amiibot && /path/to/Amiibot/.venv/bin/python amiibot.py >> /path/to/Amiibot/cron.log 2>&1
+tail -f log.txt | jq -r '[.ts, .level, .message] | join(" ")'
 ```
 
-!!! note "Finding Python Path"
-    ```bash
-    cd /path/to/Amiibot
-    source .venv/bin/activate
-    which python  # Copy this path for crontab
-    ```
+## Check the database
 
-### Using the Runner Script
-
-The repository includes a convenient runner script:
+SQLite stores everything in `<name>.db` (so `amiibot.db` with the config above):
 
 ```bash
-# Make it executable
-chmod +x amiibot_runner.sh
-
-# Run it
-./amiibot_runner.sh
+sqlite3 amiibot.db "SELECT Website, COUNT(*) FROM amiibo_stock GROUP BY Website;"
 ```
-
----
-
-## Verification
-
-### Check Logs
-
-```bash
-# View recent logs
-tail -f log.txt
-
-# View log with timestamps
-cat log.txt
-```
-
-Log file entries are written as JSON lines, one object per entry:
-
-```bash
-# Query logs with jq
-tail -1 log.txt | jq '.ts, .level, .logger, .message'
-```
-
-For JSON output on the console as well:
-
-```bash
-uv run python amiibot.py --log-json
-```
-
-### Check Database
-
-```bash
-# For SQLite
-sqlite3 amiibot.db "SELECT COUNT(*) FROM amiibo_stock;"
-
-# For PostgreSQL
-psql -U amiibot_user -d amiibot -c "SELECT COUNT(*) FROM amiibo_stock;"
-```
-
-### Test Notification
-
-After first run, you should receive notifications for any amiibo currently in stock!
-
----

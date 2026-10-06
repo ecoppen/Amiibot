@@ -1,287 +1,58 @@
-# Troubleshooting Guide
+# Troubleshooting
 
-Common issues and their solutions.
+Start with `log.txt` (or the console, or `journalctl -u amiibot` if you use the systemd timer). Setting `LOGLEVEL=DEBUG` for one run gives you more detail.
 
----
+## "config/config.json does not exist"
 
-## Configuration Issues
+You're either not in the Amiibot directory or you haven't copied the example config yet. The path is relative to wherever you run the script from, so check your cron line or `WorkingDirectory=` has the right directory.
 
-### Error: "Configuration file not found"
+## "Configuration validation failed"
 
-**Symptom:**
-```
-ValueError: config/config.json does not exist
-```
+Amiibot exits with code 1 and tells you which field is wrong. The usual suspects are the placeholder webhook URL left in from `config.example.json`, an empty `stockists` list, a stockist value that isn't one of the supported ones, a Telegram token that doesn't look like `123456789:AA...`, and a stray trailing comma in the JSON. [Configuration](configuration.md) has the details.
 
-**Solution:**
-```bash
-cd config
-cp config.example.json config.json
-# Edit config.json with your settings
-```
+## "Another instance is already running"
 
----
+Amiibot holds a lock on `.amiibot.lock` while it runs, and a second copy exits straight away with code 1. Most of the time this is fine: the previous run is still going. If it keeps happening, check what's running with `pgrep -af amiibot.py`. A leftover `.amiibot.lock` file on its own does nothing, because the lock is released when the process dies, so you never need to delete it.
 
-### Error: "Discord webhook URL may be invalid"
+## No items returned, or exit code 2
 
-**Symptom:**
-```
-WARNING - Discord webhook URL may be invalid: https://example.com
-```
+You'll see `No items returned from <shop>` in the log, and the run exits with 2. Amiibot deliberately does nothing with an empty result, so you won't get false delisting alerts, but you also won't get alerts for that shop until it works again. Likely causes:
 
-**Solution:**
-Ensure your webhook URL contains `discord.com/api/webhooks/`:
-```
-https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
-```
+- The shop changed its page layout and the scraper needs updating. If a shop has been empty for days, this is it, and an issue on GitHub is welcome.
+- The shop is blocking you or timing out. Requests give up after 5 seconds (`REQUEST_TIMEOUT` in `constants.py`), and a timeout or HTTP error is logged as a warning and counts as an empty result.
+- It's a Selenium shop and Chrome isn't working (next section).
 
----
+## Selenium or Chrome errors
 
-### Error: "Empty stockists list"
+You'll see `WebDriver exception` or `Selenium timeout` in the log. Several shops (Best Buy, GameStop, GAME, ShopTo, The Source, Play-Asia and Meccha Japan, in some cases only as a fallback) need a real browser. Install Chrome or Chromium on the machine and make sure you can launch it. Selenium downloads a matching driver the first time it's needed, which needs internet access and a writable home directory for the user running Amiibot.
 
-**Symptom:**
-```
-Configuration validation failed:
-  - Discord messenger must have at least one stockist configured
-```
+On a Raspberry Pi or other ARM Linux box that automatic download often doesn't work. Install the browser and driver from your distro instead, which is usually `chromium` and `chromium-driver` on Debian-based systems (the package names vary).
 
-**Solution:**
-Add at least one stockist to your messenger configuration:
-```json
-{
-  "stockists": ["bestbuy.com", "gamestop.com"]
-}
-```
+## Discord rate limiting
 
----
+`<name> is rate limited; deferring remaining notifications` means Discord returned a 429. The alerts aren't lost. They stay queued and go out on the next run, as long as that's within 24 hours and five attempts. This normally only happens when a lot of alerts go out at once, such as the first run against a new shop. If you've set `DISCORD_WEBHOOK_URL`, remember it points every Discord messenger at the same webhook, which makes it more likely.
 
-## Database Issues
+## Alerts aren't arriving
 
-### Error: "Database connection failed"
+Work through these in order:
 
-**For SQLite:**
-- Check file permissions: `ls -l *.db`
-- Ensure directory is writable
+1. Is the messenger `"active": true`? An inactive one scrapes but never sends.
+2. Is it a Telegram messenger? Telegram alerts aren't currently delivered (see the note in [Configuration](configuration.md)).
+3. Did the run log `Queued N notification(s)`? If not, nothing changed, or the change was inside the 60-minute cooldown (the log says `cooldown`).
+4. If it queued some, look at what happened to them:
 
-**For PostgreSQL:**
-- Check credentials in config.json
-- Test connection: `psql -U username -d amiibot`
-- Verify PostgreSQL is running: `systemctl status postgresql`
+    ```bash
+    sqlite3 amiibot.db "SELECT title, stock_status, messenger_name, delivery_status FROM notification_deliveries ORDER BY id DESC LIMIT 10;"
+    ```
 
----
+    `permanent_failure` means Discord rejected the message, usually because the webhook was deleted or the URL is wrong. `transient_failure` means it'll be retried.
 
-### Error: "Table does not exist"
+## Everything was announced as new again
 
-**Solution:**
-Tables are created automatically on first run. If missing:
-```python
-python -c "from database import Base, Database; from config.config import load_config; config = load_config('config/config.json'); db = Database(config.database); print('Tables created')"
-```
+Amiibot lost track of what it had seen. The database name is a path relative to the working directory, so running it from a different directory, or changing `name` in the config, starts a new empty database and the first run alerts on every product. Go back to the original directory and name, or restore the old `.db` file.
 
----
+## Database errors
 
-## Scraping Issues
+For SQLite, make sure the user running Amiibot can write to the `.db` file and the directory it's in. For Postgres, check the credentials and that the server is up (`psql -h 127.0.0.1 -U amiibot amiibot`).
 
-### Error: "Request timed out"
-
-**Symptom:**
-```
-WARNING - Request timed out on attempt 1/3
-```
-
-**Solution:**
-- Check internet connection
-- Increase timeout in `constants.py`: `REQUEST_TIMEOUT = 10`
-- Retry will happen automatically (3 attempts)
-
----
-
-### Error: "Selenium exception"
-
-**Symptom:**
-```
-ERROR - Selenium exception: ...
-```
-
-**Solution:**
-```bash
-# Install Chrome/Chromium
-sudo apt install chromium-browser chromium-chromedriver
-
-# Or update chromedriver
-pip install --upgrade chromedriver-autoinstaller
-```
-
----
-
-### Error: "No items scraped"
-
-**Possible Causes:**
-1. Website structure changed
-2. IP blocked by retailer
-3. JavaScript not loading
-
-**Solutions:**
-- Check logs for specific errors
-- Try different network/VPN
-- Report issue on GitHub
-
----
-
-## Notification Issues
-
-### Discord webhook not working
-
-**Check:**
-1. Webhook URL is correct
-2. Channel still exists
-3. Webhook wasn't deleted
-4. Bot has permissions
-
-**Test webhook:**
-```bash
-curl -X POST "YOUR_WEBHOOK_URL" \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Test message"}'
-```
-
----
-
-### Telegram bot not responding
-
-**Check:**
-1. Bot token is correct
-2. Chat ID is correct
-3. You sent `/start` to bot
-4. Bot isn't blocked
-
-**Test bot:**
-```bash
-curl "https://api.telegram.org/botYOUR_BOT_TOKEN/getMe"
-```
-
----
-
-## Performance Issues
-
-### High CPU usage
-
-**Causes:**
-- Too many stockists
-- Selenium driver not closing
-
-**Solutions:**
-- Reduce stockist count
-- Check `driver.quit()` in logs
-- Increase scrape interval in cron
-
----
-
-### High memory usage
-
-**Causes:**
-- Session leaks
-- Large log files
-
-**Solutions:**
-- Logs rotate automatically (5MB limit)
-- Clean old records: See database cleanup methods
-- Restart service periodically
-
----
-
-## Logs and Debugging
-
-### Enable debug logging
-
-Edit `amiibot.py`:
-```python
-level=os.environ.get("LOGLEVEL", "DEBUG")
-```
-
-Or set environment variable:
-```bash
-LOGLEVEL=DEBUG python amiibot.py
-```
-
----
-
-### View logs
-
-```bash
-# Tail logs in real-time
-tail -f log.txt
-
-# View last 100 lines
-tail -100 log.txt
-
-# Search for errors
-grep ERROR log.txt
-
-# Check log rotation
-ls -lh log.txt*
-```
-
----
-
-## Common Error Messages
-
-### "Module not found"
-
-**Solution:**
-```bash
-# Reinstall dependencies
-uv sync
-# or
-pip install -e .
-```
-
----
-
-### "Permission denied"
-
-**Solution:**
-```bash
-# Fix file permissions
-chmod +x amiibot_runner.sh
-chmod 644 config/config.json
-
-# Fix directory permissions
-chmod 755 /path/to/Amiibot
-```
-
----
-
-### "Port already in use" (PostgreSQL)
-
-**Solution:**
-```bash
-# Find process using port
-sudo lsof -i :5432
-
-# Change port in config if needed
-```
-
----
-
-## Health Checks
-
-Run these commands to verify system health:
-
-```bash
-# Check Python version
-python --version  # Should be 3.13+
-
-# Check dependencies
-pip list | grep -E "beautifulsoup4|selenium|sqlalchemy"
-
-# Check database
-sqlite3 amiibot.db ".tables"  # SQLite
-psql -U user -d amiibot -c "\dt"  # PostgreSQL
-
-# Test configuration
-python -c "from config.config import load_config; load_config('config/config.json'); print('OK')"
-
-# Check logs for errors
-grep -i error log.txt | tail -20
-```
+Tables are created and upgraded automatically at the start of every run. If you get an error about a missing column right after an update, the upgrade probably couldn't run, most often because the Postgres user isn't allowed to alter the tables or the SQLite file is read-only. Fix the permissions and run it again.

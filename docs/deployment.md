@@ -1,316 +1,74 @@
-# Deployment Guide
+# Scheduling
 
-Production deployment strategies for Amiibot.
+Amiibot does one check and exits, so something else has to run it repeatedly. Every 10 minutes is a reasonable interval. A run with several browser-based shops can take a few minutes, and hammering the shops more often than that is more likely to get you blocked than to get you alerts any sooner. If a run is still going when the next one starts, the new one logs "Another instance is already running" and exits, so overlap is harmless.
 
----
+Both examples below assume Amiibot is in `/home/you/Amiibot` and you've already run `uv sync` there. They call the virtualenv's Python directly, because cron and systemd often don't have `uv` on their `PATH`. The working directory matters: the config, database, log file and lock file are all looked up relative to it.
 
-## Deployment Options
+## Cron
 
-### Option 1: Cron Job (Simplest)
-
-Best for: Personal use, simple setups
-
-```bash
-# Edit crontab
-crontab -e
-
-# Run every 30 minutes
-*/30 * * * * cd /path/to/Amiibot && /path/to/Amiibot/.venv/bin/python amiibot.py >> /path/to/Amiibot/cron.log 2>&1
+```
+*/10 * * * * cd /home/you/Amiibot && .venv/bin/python amiibot.py >> cron.log 2>&1
 ```
 
-**Advantages:**
-- Simple setup
-- No additional services
-- Works on any system with cron
+Add it with `crontab -e`. `log.txt` already has everything and rotates itself, but `cron.log` doesn't, and it's the only place a crash before logging starts (a missing dependency, say) would show up.
 
-**Disadvantages:**
-- No automatic restart on failure
-- Limited monitoring
-- Manual log management
+## systemd timer
 
----
+Because the script exits after each run, the service should be `Type=oneshot` and a timer should start it. Don't use `Type=simple` with `Restart=on-failure`: exit code 2 just means a shop failed that time, and systemd would keep restarting it.
 
-### Option 2: Systemd Service (Recommended)
-
-Best for: Production, 24/7 operation, Linux servers
-
-#### Create Service File
-
-Create `/etc/systemd/system/amiibot.service`:
+`/etc/systemd/system/amiibot.service`:
 
 ```ini
 [Unit]
-Description=Amiibot Stock Notifier
-After=network.target postgresql.service
-Wants=postgresql.service
+Description=Amiibot stock check
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-User=amiibot
-Group=amiibot
-WorkingDirectory=/opt/amiibot
-Environment="PATH=/opt/amiibot/.venv/bin"
-ExecStart=/opt/amiibot/.venv/bin/python amiibot.py
-Restart=on-failure
-RestartSec=30
-StandardOutput=append:/var/log/amiibot/stdout.log
-StandardError=append:/var/log/amiibot/stderr.log
+Type=oneshot
+User=you
+WorkingDirectory=/home/you/Amiibot
+ExecStart=/home/you/Amiibot/.venv/bin/python amiibot.py
+SuccessExitStatus=2
+```
 
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/amiibot
+`SuccessExitStatus=2` stops systemd marking the unit as failed when only some shops failed. Drop it if you'd like to see those runs flagged.
+
+`/etc/systemd/system/amiibot.timer`:
+
+```ini
+[Unit]
+Description=Run Amiibot every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target
 ```
 
-#### Setup Steps
+`OnUnitInactiveSec` counts from when the previous run finished, which also keeps runs from stacking up. Enable it with:
 
 ```bash
-# Create user
-sudo useradd -r -s /bin/false amiibot
-
-# Create directory
-sudo mkdir -p /opt/amiibot
-sudo mkdir -p /var/log/amiibot
-
-# Copy files
-sudo cp -r /path/to/Amiibot/* /opt/amiibot/
-
-# Set permissions
-sudo chown -R amiibot:amiibot /opt/amiibot
-sudo chown -R amiibot:amiibot /var/log/amiibot
-
-# Enable and start service
 sudo systemctl daemon-reload
-sudo systemctl enable amiibot
-sudo systemctl start amiibot
-
-# Check status
-sudo systemctl status amiibot
+sudo systemctl enable --now amiibot.timer
 ```
 
-#### Service Management
+Check on it with `systemctl list-timers amiibot.timer` and read the output of the last run with `journalctl -u amiibot -n 50`.
+
+## Looking after it
+
+Your config contains webhook URLs and possibly a database password, so `chmod 600 config/config.json` is sensible. The logs redact webhook tokens, bot tokens and chat IDs.
+
+The database is Amiibot's memory. If you lose it, the next run treats every product as new and alerts on all of them, so it's worth copying `amiibot.db` somewhere now and then (`pg_dump` for Postgres). Don't delete old rows to tidy up for the same reason. Nothing in Amiibot prunes the database, and it grows slowly.
+
+To update:
 
 ```bash
-# Start service
-sudo systemctl start amiibot
-
-# Stop service
-sudo systemctl stop amiibot
-
-# Restart service
-sudo systemctl restart amiibot
-
-# View logs
-sudo journalctl -u amiibot -f
-
-# Check status
-sudo systemctl status amiibot
+cd /home/you/Amiibot
+git pull
+uv sync
 ```
 
-**Advantages:**
-- Automatic restart on failure
-- Integrated logging
-- System-level management
-- Starts on boot
-
-## Production Checklist
-
-### Pre-Deployment
-
-- [ ] Configuration file created and validated
-- [ ] Database configured (PostgreSQL recommended)
-- [ ] Messenger webhooks/tokens tested
-- [ ] Dependencies installed
-- [ ] Logs directory created
-- [ ] Permissions set correctly
-
-### Security
-
-- [ ] Config file not world-readable: `chmod 600 config/config.json`
-- [ ] Separate user account created
-- [ ] No sensitive data in logs
-- [ ] Database password secure
-- [ ] Webhook URLs kept private
-
-### Monitoring
-
-- [ ] Log rotation configured (automatic with RotatingFileHandler)
-- [ ] Disk space monitoring set up
-- [ ] Error alerting configured
-- [ ] Database backup scheduled
-
-### Performance
-
-- [ ] Appropriate scrape interval set
-- [ ] Resource limits configured (systemd)
-- [ ] Database optimized
-- [ ] Old records cleanup scheduled
-
----
-
-## Monitoring and Maintenance
-
-### Log Monitoring
-
-```bash
-# View recent logs
-tail -f /var/log/amiibot/stdout.log
-
-# Check for errors
-grep ERROR /opt/amiibot/log.txt
-
-# Log rotation status
-ls -lh /opt/amiibot/log.txt*
-```
-
-### Database Maintenance
-
-```bash
-# SQLite vacuum (optimize)
-sqlite3 amiibot.db "VACUUM;"
-
-# PostgreSQL maintenance
-psql -U amiibot_user -d amiibot -c "VACUUM ANALYZE;"
-
-# Check database size
-du -h amiibot.db  # SQLite
-psql -U amiibot_user -d amiibot -c "SELECT pg_size_pretty(pg_database_size('amiibot'));"  # PostgreSQL
-```
-
-### Cleanup Old Records
-
-Add to crontab to run weekly:
-
-```bash
-# Clean records older than 30 days
-0 0 * * 0 cd /opt/amiibot && /opt/amiibot/.venv/bin/python -c "from database import Database; from config.config import load_config; config = load_config('config/config.json'); db = Database(config.database); db.cleanup_old_records(30)" >> /var/log/amiibot/cleanup.log 2>&1
-```
-
----
-
-## Scaling
-
-### Multiple Instances
-
-Run multiple instances for different regions:
-
-```bash
-# Instance 1: US stockists
-/opt/amiibot-us/
-  config/config.json  # US stockists only
-
-# Instance 2: UK stockists
-/opt/amiibot-uk/
-  config/config.json  # UK stockists only
-```
-
-Each with its own systemd service:
-- `amiibot-us.service`
-- `amiibot-uk.service`
-
-### Load Balancing
-
-For high-volume scraping:
-- Use PostgreSQL for shared database
-- Run instances on multiple servers
-- Coordinate scraping times to avoid overlap
-
----
-
-## Backup Strategy
-
-### Configuration Backup
-
-```bash
-# Backup config (automated)
-0 0 * * * cp /opt/amiibot/config/config.json /backup/amiibot-config-$(date +\%Y\%m\%d).json
-```
-
-### Database Backup
-
-```bash
-# SQLite backup
-cp amiibot.db amiibot.db.backup
-
-# PostgreSQL backup
-pg_dump -U amiibot_user amiibot > amiibot_backup.sql
-
-# Automated PostgreSQL backup (cron)
-0 2 * * * pg_dump -U amiibot_user amiibot | gzip > /backup/amiibot-$(date +\%Y\%m\%d).sql.gz
-```
-
----
-
-## Updates and Upgrades
-
-### Update Amiibot
-
-```bash
-# Pull latest code
-cd /opt/amiibot
-sudo -u amiibot git pull
-
-# Update dependencies
-sudo -u amiibot uv sync
-
-# Restart service
-sudo systemctl restart amiibot
-```
-
-### Database Migration
-
-When upgrading between versions:
-
-```bash
-# Backup first!
-pg_dump -U amiibot_user amiibot > backup.sql
-
-# Run migrations (if any)
-python migrate.py
-
-# Test
-python amiibot.py
-```
-
----
-
-## Troubleshooting Production Issues
-
-See [Troubleshooting Guide](troubleshooting.md) for detailed solutions.
-
-### Quick Diagnostics
-
-```bash
-# Check service status
-sudo systemctl status amiibot
-
-# View recent logs
-sudo journalctl -u amiibot -n 100
-
-# Check resource usage
-top -p $(pgrep -f amiibot)
-
-# Check disk space
-df -h
-
-# Check database connectivity
-psql -U amiibot_user -d amiibot -c "SELECT 1;"
-```
-
----
-
-## Best Practices
-
-1. **Use PostgreSQL for Production**: More reliable than SQLite
-2. **Monitor Logs Regularly**: Set up log monitoring alerts
-3. **Backup Database Weekly**: Automate with cron
-4. **Keep Config Secure**: Use proper file permissions
-5. **Test Before Deploying**: Run locally first
-6. **Document Changes**: Keep deployment notes
-7. **Monitor Disk Space**: Logs and database grow over time
-8. **Update Regularly**: Stay current with latest version
+Database changes are applied automatically at the start of the next run, so there's no migration step.
