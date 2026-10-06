@@ -73,8 +73,7 @@ def validate_products(
     errors = []
     for idx, item in enumerate(products):
         try:
-            ScrapedProduct(**item)
-            valid.append(item)
+            valid.append(ScrapedProduct(**item).model_dump(exclude_none=True))
         except Exception as e:
             errors.append(f"item {idx}: {e}")
     return valid, errors

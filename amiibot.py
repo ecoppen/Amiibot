@@ -16,7 +16,6 @@ from stockist.manager import StockistManager
 from utils import JSONFormatter
 
 logs_file = Path(Path().resolve(), LOG_FILE_NAME)
-logs_file.touch(exist_ok=True)
 
 log = logging.getLogger(__name__)
 
@@ -58,22 +57,31 @@ def setup_logging(log_json: bool = False) -> None:
 
 
 class SecretRedactionFilter(logging.Filter):
+    """Redact secrets from everything a record can render.
+
+    The message is fully rendered first, so secrets inside non-string
+    arguments (for example an exception whose text contains a webhook URL)
+    are caught. Tracebacks and string-valued ``extra`` fields are redacted too.
+    """
+
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = redact_secrets(record.msg)
-        if record.args and isinstance(record.args, tuple):
-            record.args = tuple(
-                redact_secrets(str(a)) if isinstance(a, str) else a for a in record.args
-            )
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = f"{record.msg} {record.args}"
+        record.msg = redact_secrets(message)
+        record.args = None
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_secrets(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_secrets(record.stack_info)
+        for key, value in list(record.__dict__.items()):
+            if key not in JSONFormatter.SKIPPED_KEYS and isinstance(value, str):
+                record.__dict__[key] = redact_secrets(value)
         return True
 
-
-for handler in logging.getLogger().handlers:
-    handler.addFilter(SecretRedactionFilter())
-
-setup_logging()
-
-log = logging.getLogger(__name__)
 
 _database: Database | None = None
 _messengers: MessageManager | None = None

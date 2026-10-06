@@ -280,12 +280,11 @@ class TestSecretRedactionFilter:
 
         SecretRedactionFilter().filter(record)
 
+        assert record.args is None
+        assert "secretToken123" not in record.msg
         assert (
-            record.args[0]
-            != "webhook at https://discord.com/api/webhooks/123/secretToken123"
+            record.msg == "Details: webhook at https://discord.com/api/webhooks/123/***"
         )
-        assert "secretToken123" not in record.args[0]
-        assert record.args[0].endswith("***")
 
     def test_filter_keeps_non_string_args(self):
         import logging
@@ -304,7 +303,8 @@ class TestSecretRedactionFilter:
 
         SecretRedactionFilter().filter(record)
 
-        assert record.args == (42,)
+        assert record.args is None
+        assert record.msg == "Count: 42"
 
     def test_filter_returns_true(self):
         import logging
@@ -322,3 +322,116 @@ class TestSecretRedactionFilter:
         )
 
         assert SecretRedactionFilter().filter(record) is True
+
+    def test_filter_redacts_secret_in_exception_arg(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        err = RuntimeError("POST https://discord.com/api/webhooks/123/secretToken123")
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="Failed: %s",
+            args=(err,),
+            exc_info=None,
+        )
+
+        SecretRedactionFilter().filter(record)
+
+        assert "secretToken123" not in record.getMessage()
+        assert record.getMessage().endswith("webhooks/123/***")
+
+    def test_filter_redacts_secret_in_traceback(self):
+        import logging
+        import sys
+
+        from amiibot import SecretRedactionFilter
+
+        try:
+            raise RuntimeError("https://discord.com/api/webhooks/123/secretToken123")
+        except RuntimeError:
+            exc_info = sys.exc_info()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="Boom",
+            args=(),
+            exc_info=exc_info,
+        )
+
+        SecretRedactionFilter().filter(record)
+
+        assert record.exc_text is not None
+        assert "RuntimeError" in record.exc_text
+        assert "secretToken123" not in record.exc_text
+        # The standard formatter reuses exc_text, so console output is redacted.
+        assert "secretToken123" not in logging.Formatter().format(record)
+
+    def test_filter_redacts_secret_in_string_extra(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+        record.__dict__["target"] = (
+            "https://discord.com/api/webhooks/123/secretToken123"
+        )
+        record.__dict__["count"] = 3
+
+        SecretRedactionFilter().filter(record)
+
+        assert "secretToken123" not in record.__dict__["target"]
+        assert record.__dict__["count"] == 3
+
+    def test_filter_survives_bad_format_args(self):
+        import logging
+
+        from amiibot import SecretRedactionFilter
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="no placeholders",
+            args=("extra",),
+            exc_info=None,
+        )
+
+        assert SecretRedactionFilter().filter(record) is True
+        assert record.args is None
+
+
+class TestImportSideEffects:
+    def test_import_does_not_touch_log_file_or_handlers(self, tmp_path):
+        import subprocess
+        import sys
+
+        code = (
+            "import logging, pathlib, amiibot; "
+            "print(pathlib.Path('log.txt').exists(), "
+            "len(logging.getLogger().handlers))"
+        )
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            env={"PYTHONPATH": str(root), "PATH": ""},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "False 0"

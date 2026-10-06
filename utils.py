@@ -7,7 +7,7 @@ formatting, and utility tasks.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
@@ -16,9 +16,11 @@ log = logging.getLogger(__name__)
 class JSONFormatter(logging.Formatter):
     """Format log records as single-line JSON objects.
 
-    Emits keys ``ts`` (ISO8601 UTC timestamp), ``level``, ``logger`` and
-    ``message``. Any extra fields passed via the ``extra`` keyword of a log
-    call are included as-is.
+    Emits keys ``ts`` (ISO8601 UTC timestamp with milliseconds), ``level``,
+    ``logger`` and ``message``. ``exc_info`` and ``stack_info`` are included
+    as formatted strings when present. Any extra fields passed via the
+    ``extra`` keyword of a log call are included, with values that are not
+    JSON serialisable converted using ``str``.
     """
 
     _SKIPPED_KEYS = frozenset(
@@ -48,9 +50,14 @@ class JSONFormatter(logging.Formatter):
         }
     )
 
+    # Keys that are never treated as extras. Shared with SecretRedactionFilter.
+    SKIPPED_KEYS = _SKIPPED_KEYS
+
     def format(self, record: logging.LogRecord) -> str:
+        created = datetime.fromtimestamp(record.created, tz=timezone.utc)
         data: dict[str, Any] = {
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "ts": created.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{created.microsecond // 1000:03d}Z",
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -58,7 +65,14 @@ class JSONFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key not in data and key not in self._SKIPPED_KEYS:
                 data[key] = value
-        return json.dumps(data)
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            data["exc_info"] = record.exc_text
+        if record.stack_info:
+            data["stack_info"] = self.formatStack(record.stack_info)
+        return json.dumps(data, default=str)
 
 
 def format_price(price: float, currency: str = "$") -> str:
