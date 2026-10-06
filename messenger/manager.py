@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Union
+from typing import Any
 
 from messenger.discord import Discord
 from messenger.telegram import Telegram
@@ -17,15 +17,14 @@ class MessageManager:
         Raises:
             ValueError: If duplicate messenger names are used
         """
-        self.all_messengers: list[Union[Discord, Telegram]] = []
+        self.all_messengers: list[Discord | Telegram] = []
         self.messenger_names: list[str] = []
 
-        for messenger_config in config:
+        for messenger_config, messenger_object in config.items():
             if messenger_config in self.messenger_names:
                 raise ValueError(
                     f"The messenger name {messenger_config} was used multiple times, it must be unique"
                 )
-            messenger_object = config[messenger_config]
             if messenger_object.messenger_type == "discord":
                 discord = Discord(
                     name=messenger_config,

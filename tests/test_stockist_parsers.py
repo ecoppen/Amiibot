@@ -2,10 +2,10 @@
 Unit tests for stockist HTML/JSON parsers.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
-from stockist.stockist import Stock
+import pytest
+
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
 from stockist.game import Game
@@ -13,6 +13,7 @@ from stockist.gamestop import Gamestop
 from stockist.mecchajapan import MecchaJapan
 from stockist.playasia import PlayAsia
 from stockist.shopto import Shopto
+from stockist.stockist import Stock
 from stockist.thesource import TheSource
 
 

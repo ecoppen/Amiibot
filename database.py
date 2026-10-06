@@ -1,12 +1,13 @@
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, ClassVar
 
 import sqlalchemy as db
 from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.types import TypeDecorator
 
 from config.config import DatabaseConfig as Database_
 from constants import (
@@ -16,6 +17,7 @@ from constants import (
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
 from stockist.stockist import URGENT_STATUSES, Stock
+from timeutil import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +44,49 @@ _SCRAPING_FAILURE_MIGRATION_COLUMNS: list[tuple[str, str]] = [
 ]
 
 
+class UTCDateTime(TypeDecorator[datetime]):
+    """A datetime column that is aware UTC in Python and naive UTC in the database.
+
+    Neither sqlite nor Postgres ``TIMESTAMP`` (without time zone) keeps a zone,
+    so values are stored as naive UTC and tagged as UTC again on the way out.
+
+    Writing: aware values are converted to UTC and stripped of their tzinfo.
+    Naive values are rejected with ``ValueError``: guessing a zone is how
+    local-time bugs creep back in, so callers must pass aware datetimes
+    (use ``timeutil.utcnow()``).
+
+    Reading: stored values are returned as aware UTC.
+
+    NOTE: rows written before this type existed hold naive *local* times. They
+    are now read as UTC, a one-off shift of at most an hour (the UK offset
+    from UTC). No data migration is done; cooldowns and outbox ages simply
+    start counting from slightly different instants.
+    """
+
+    impl = db.DateTime
+    cache_ok = True
+
+    def process_bind_param(
+        self, value: datetime | None, dialect: Any
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError(
+                "naive datetime passed to a UTCDateTime column; use an aware datetime"
+            )
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(
+        self, value: datetime | None, dialect: Any
+    ) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC)
+
+
 class Base(DeclarativeBase):
-    pass
+    type_annotation_map: ClassVar[dict[Any, Any]] = {datetime: UTCDateTime}
 
 
 class AmiiboStock(Base):
@@ -58,7 +101,7 @@ class AmiiboStock(Base):
     Colour: Mapped[str]
     URL: Mapped[str]
     Image: Mapped[str]
-    timestamp: Mapped[datetime] = mapped_column(default=datetime.now)
+    timestamp: Mapped[datetime] = mapped_column(default=utcnow)
     missed_count: Mapped[int] = mapped_column(default=0)
     last_notified_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_notified_status: Mapped[str | None] = mapped_column(nullable=True)
@@ -75,7 +118,7 @@ class NotificationOutbox(Base):
     url: Mapped[str]
     title: Mapped[str]
     stock_status: Mapped[str]
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
     price: Mapped[str] = mapped_column(default="")
     image: Mapped[str] = mapped_column(default="")
     colour: Mapped[int] = mapped_column(default=0)
@@ -98,14 +141,14 @@ class NotificationDelivery(Base):
     stock_status: Mapped[str]
     messenger_name: Mapped[str]
     delivery_status: Mapped[str]
-    delivered_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    delivered_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class LastScraped(Base):
     __tablename__ = "last_scraped"
 
     stockist: Mapped[str] = mapped_column(primary_key=True)
-    last_attempt_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    last_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_success_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_healthy_count: Mapped[int] = mapped_column(default=0)
     consecutive_unhealthy_obs: Mapped[int] = mapped_column(default=0)
@@ -118,7 +161,7 @@ class ScrapingFailure(Base):
 
     stockist: Mapped[str] = mapped_column(primary_key=True)
     consecutive_failures: Mapped[int] = mapped_column(default=0)
-    last_failure: Mapped[datetime] = mapped_column(default=datetime.now)
+    last_failure: Mapped[datetime] = mapped_column(default=utcnow)
     last_success: Mapped[datetime | None] = mapped_column(nullable=True)
     alert_sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
@@ -133,11 +176,11 @@ class ScrapingRecovery:
 
 class Database:
     def __init__(self, config: Database_) -> None:
-        pool_kwargs: dict[str, Any] = dict(
-            pool_size=DB_POOL_SIZE,
-            max_overflow=DB_MAX_OVERFLOW,
-            pool_pre_ping=True,
-        )
+        pool_kwargs: dict[str, Any] = {
+            "pool_size": DB_POOL_SIZE,
+            "max_overflow": DB_MAX_OVERFLOW,
+            "pool_pre_ping": True,
+        }
         if config.engine == "postgres":
             url = db.URL.create(
                 "postgresql+psycopg2",
@@ -313,7 +356,7 @@ class Database:
                     else:
                         conn.execute(
                             db.text(
-                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT NOW()"
+                                "ALTER TABLE last_scraped ADD COLUMN last_attempt_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC')"
                             )
                         )
                 if "last_healthy_count" not in scraped_cols:
@@ -448,12 +491,12 @@ class Database:
                 session.add(
                     LastScraped(
                         stockist=stockist,
-                        last_attempt_at=datetime.now(),
+                        last_attempt_at=utcnow(),
                         last_healthy_count=0,
                     )
                 )
             else:
-                existing.last_attempt_at = datetime.now()
+                existing.last_attempt_at = utcnow()
             session.commit()
 
     def record_healthy_scrape(self, stockist: str, item_count: int) -> None:
@@ -463,14 +506,14 @@ class Database:
                 session.add(
                     LastScraped(
                         stockist=stockist,
-                        last_attempt_at=datetime.now(),
-                        last_success_at=datetime.now(),
+                        last_attempt_at=utcnow(),
+                        last_success_at=utcnow(),
                         last_healthy_count=item_count,
                         consecutive_unhealthy_obs=0,
                     )
                 )
             else:
-                existing.last_success_at = datetime.now()
+                existing.last_success_at = utcnow()
                 existing.last_healthy_count = item_count
                 existing.consecutive_unhealthy_obs = 0
             session.commit()
@@ -481,7 +524,7 @@ class Database:
             if existing is None:
                 existing = LastScraped(
                     stockist=stockist,
-                    last_attempt_at=datetime.now(),
+                    last_attempt_at=utcnow(),
                     consecutive_unhealthy_obs=1,
                 )
                 session.add(existing)
@@ -507,13 +550,13 @@ class Database:
                 failure = ScrapingFailure(
                     stockist=stockist,
                     consecutive_failures=1,
-                    last_failure=datetime.now(),
+                    last_failure=utcnow(),
                     last_success=None,
                 )
                 session.add(failure)
             else:
                 failure.consecutive_failures += 1
-                failure.last_failure = datetime.now()
+                failure.last_failure = utcnow()
 
             session.commit()
             count = failure.consecutive_failures
@@ -548,7 +591,7 @@ class Database:
                     f"{stockist} scraping recovered after {failure.consecutive_failures} failure(s)"
                 )
             failure.consecutive_failures = 0
-            failure.last_success = datetime.now()
+            failure.last_success = utcnow()
             session.commit()
             return recovery
 
@@ -569,7 +612,7 @@ class Database:
                 session.query(ScrapingFailure).filter_by(stockist=stockist).first()
             )
             if failure is not None:
-                failure.alert_sent_at = datetime.now()
+                failure.alert_sent_at = utcnow()
                 session.commit()
 
     def clear_failure_alert(self, stockist: str) -> None:
@@ -610,7 +653,7 @@ class Database:
             )
             if existing is not None:
                 existing.delivery_status = delivery_status
-                existing.delivered_at = datetime.now()
+                existing.delivered_at = utcnow()
                 session.commit()
                 return
             delivery = NotificationDelivery(
@@ -656,7 +699,7 @@ class Database:
             row = session.get(NotificationOutbox, outbox_id)
             if row is not None:
                 row.attempts += 1
-                row.last_attempt_at = datetime.now()
+                row.last_attempt_at = utcnow()
                 session.commit()
 
     def complete_outbox(self, outbox_id: int, status: str = OUTBOX_DONE) -> None:
@@ -667,7 +710,7 @@ class Database:
             row = session.get(NotificationOutbox, outbox_id)
             if row is not None:
                 row.status = status
-                row.completed_at = datetime.now()
+                row.completed_at = utcnow()
                 session.commit()
 
     def _handle_price_change(
@@ -688,7 +731,7 @@ class Database:
     def _handle_delisted_item(self, session: Any, item: AmiiboStock) -> dict[str, Any]:
         log.info(f"{item.Title} is no longer listed")
         item.is_active = False
-        item.delisted_at = datetime.now()
+        item.delisted_at = utcnow()
         return {
             "Colour": 0xFF0000,
             "Title": item.Title,
@@ -736,7 +779,7 @@ class Database:
         Runs inside the caller's transaction so that the state change and the
         pending notification are committed (or rolled back) together.
         """
-        now = datetime.now()
+        now = utcnow()
         status = event["Stock"]
         if (
             status not in URGENT_STATUSES
@@ -772,7 +815,7 @@ class Database:
         added = []
         for datum in new_items:
             log.info(f"Adding {datum['Title']}")
-            now = datetime.now()
+            now = utcnow()
             amiibo = AmiiboStock(
                 Website=datum["Website"],
                 Title=datum["Title"],

@@ -38,7 +38,7 @@ dev = [
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
-include = ["amiibot.py", "scraper.py", "database.py", "utils.py", "constants.py", "result.py", "models.py", "config/config.py", "messenger/"]
+include = ["amiibot.py", "scraper.py", "database.py", "utils.py", "constants.py", "result.py", "models.py", "timeutil.py", "config/config.py", "messenger/"]
 exclude = ["tests", "site", "docs", "htmlcov", "__pycache__", ".mypy_cache", ".ruff_cache"]
 reportMissingTypeStubs = false
 reportMissingImports = true
@@ -72,7 +72,3 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
-
-[tool.ruff.lint]
-# Pin the pre-0.16 default rule set; adopting the expanded defaults is a separate change.
-select = ["E4", "E7", "E9", "F"]

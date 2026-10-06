@@ -17,7 +17,7 @@ class TheSource(Stockist):
     name = "The Source"
 
     def get_amiibo(self):
-        options = range(0, 2)
+        options = range(2)
 
         all_found = []
 

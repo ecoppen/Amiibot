@@ -3,11 +3,11 @@ import fcntl
 import io
 import logging
 import os
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from config.config import load_config, redact_secrets
-from constants import LOG_FILE_NAME, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+from constants import LOG_BACKUP_COUNT, LOG_FILE_NAME, LOG_MAX_BYTES
 from database import Database
 from messenger.manager import MessageManager
 from result import FailureCategory, RunResult, RunStatus
@@ -15,7 +15,7 @@ from scraper import Scraper
 from stockist.manager import StockistManager
 from utils import JSONFormatter
 
-logs_file = Path(Path().resolve(), LOG_FILE_NAME)
+logs_file = Path(Path.cwd(), LOG_FILE_NAME)
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,8 @@ class SecretRedactionFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
-        except Exception:
+        except (TypeError, ValueError, KeyError):
+            # Malformed %-style message/args: fall back to the raw parts.
             message = f"{record.msg} {record.args}"
         record.msg = redact_secrets(message)
         record.args = None
@@ -86,7 +87,7 @@ class SecretRedactionFilter(logging.Filter):
 _database: Database | None = None
 _messengers: MessageManager | None = None
 _lock_file: io.TextIOWrapper | None = None
-_LOCK_PATH = Path(Path().resolve(), ".amiibot.lock")
+_LOCK_PATH = Path(Path.cwd(), ".amiibot.lock")
 
 
 def cleanup() -> None:
@@ -97,14 +98,16 @@ def cleanup() -> None:
         try:
             fcntl.flock(_lock_file, fcntl.LOCK_UN)
             _lock_file.close()
-        except Exception as e:
+        # Cleanup must release every resource, whatever one of them raises.
+        except Exception as e:  # noqa: BLE001 - safety boundary
             log.warning(f"Error releasing lock: {e}")
         _lock_file = None
     if _database is not None:
         try:
             log.info("Disposing database engine...")
             _database.engine.dispose()
-        except Exception as e:
+        # Cleanup must release every resource, whatever one of them raises.
+        except Exception as e:  # noqa: BLE001 - safety boundary
             log.warning(f"Error disposing database: {e}")
     log.info("Shutdown complete")
 
@@ -112,9 +115,10 @@ def cleanup() -> None:
 def main(log_json: bool = False) -> RunResult:
     global _lock_file
     try:
-        _lock_file = open(_LOCK_PATH, "w")
+        # Deliberately held open for the whole process; released in cleanup().
+        _lock_file = open(_LOCK_PATH, "w")  # noqa: SIM115
         fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (IOError, OSError):
+    except OSError:
         log.error("Another instance is already running. Exiting.")
         return RunResult(
             status=RunStatus.FAILURE,
@@ -159,8 +163,8 @@ if __name__ == "__main__":
             failure_category=FailureCategory.UNEXPECTED,
             errors=["Interrupted by user"],
         )
-    except Exception as e:
-        log.error(f"Fatal error: {e}", exc_info=True)
+    except Exception as e:  # top-level handler: report and exit non-zero
+        log.exception("Fatal error")
         result = RunResult(
             status=RunStatus.FAILURE,
             exit_code=1,

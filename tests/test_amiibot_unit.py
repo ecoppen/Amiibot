@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 class TestAmiibotLogging:
     def test_logging_constants(self):
-        from constants import LOG_FILE_NAME, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+        from constants import LOG_BACKUP_COUNT, LOG_FILE_NAME, LOG_MAX_BYTES
 
         assert LOG_FILE_NAME == "log.txt"
         assert LOG_MAX_BYTES == 5 * 1024 * 1024
@@ -165,7 +165,7 @@ class TestAmiibotIntegration:
         assert StockistManager is not None
 
     def test_constants_imported(self):
-        from constants import LOG_FILE_NAME, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+        from constants import LOG_BACKUP_COUNT, LOG_FILE_NAME, LOG_MAX_BYTES
 
         assert isinstance(LOG_FILE_NAME, str)
         assert isinstance(LOG_MAX_BYTES, int)
@@ -187,7 +187,7 @@ class TestAmiibotIntegration:
     def test_path_resolution(self):
         from pathlib import Path
 
-        logs_file = Path(Path().resolve(), "log.txt")
+        logs_file = Path(Path.cwd(), "log.txt")
         assert logs_file.name == "log.txt"
 
     def test_global_variables_initialized(self):
@@ -217,8 +217,8 @@ class TestAmiibotErrorHandling:
 class TestAmiibotModuleStructure:
     def test_module_has_docstring(self):
         import amiibot
-        import scraper
         import database
+        import scraper
 
         assert hasattr(amiibot, "__file__")
         assert hasattr(scraper, "__file__")
@@ -234,8 +234,8 @@ class TestAmiibotModuleStructure:
         import logging
         import os
         import sys
-        from pathlib import Path
         from logging.handlers import RotatingFileHandler
+        from pathlib import Path
 
         assert all([logging, os, sys, Path, RotatingFileHandler])
 
@@ -432,6 +432,7 @@ class TestImportSideEffects:
             env={"PYTHONPATH": str(root), "PATH": ""},
             capture_output=True,
             text=True,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "False 0"
@@ -445,7 +446,8 @@ class TestLockFile:
 
         lock_path = tmp_path / ".amiibot.lock"
         with patch.object(amiibot, "_LOCK_PATH", lock_path):
-            amiibot._lock_file = open(lock_path, "w")
+            # Handed to amiibot, which closes it in cleanup().
+            amiibot._lock_file = open(lock_path, "w")  # noqa: SIM115
             fcntl.flock(amiibot._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
             amiibot.cleanup()

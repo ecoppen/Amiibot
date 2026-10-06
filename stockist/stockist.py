@@ -3,6 +3,7 @@ import secrets
 from enum import Enum
 from typing import Any
 
+import urllib3
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
@@ -75,7 +76,7 @@ class Stockist:
             if driver is not None:
                 try:
                     driver.quit()
-                except Exception as e:
+                except (WebDriverException, OSError, urllib3.exceptions.HTTPError) as e:
                     log.warning(f"Error closing Selenium driver: {e}")
 
     def get_amiibo(self) -> list[dict[str, Any]]:

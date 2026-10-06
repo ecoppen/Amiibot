@@ -1,7 +1,6 @@
 import json
 import logging
 
-
 from stockist.stockist import Stock, Stockist
 
 log = logging.getLogger(__name__)

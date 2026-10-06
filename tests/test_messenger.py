@@ -1,11 +1,15 @@
-import pytest
+from datetime import UTC, datetime, timedelta
+from typing import Any, ClassVar
 from unittest.mock import Mock, patch
-from messenger.messenger import Messenger
-from messenger.discord import Discord
-from messenger.telegram import Telegram
-from messenger.manager import MessageManager
-from result import DeliveryResult, DeliveryStatus
+
+import pytest
 import requests
+
+from messenger.discord import Discord
+from messenger.manager import MessageManager
+from messenger.messenger import Messenger
+from messenger.telegram import Telegram
+from result import DeliveryResult, DeliveryStatus
 
 
 class TestMessenger:
@@ -299,7 +303,7 @@ class TestDiscord:
         assert sent_data["embeds"][0]["fields"][0]["name"] == "Price"
         assert sent_data["embeds"][0]["fields"][0]["value"] == "$5.00"
         assert sent_data["embeds"][0]["fields"][0]["inline"] is True
-        assert "text" in sent_data["embeds"][0]["footer"]
+        assert sent_data["embeds"][0]["footer"]["text"] == "Amiibot"
 
     def test_send_embed_message_inactive(self):
         discord = Discord(
@@ -317,7 +321,7 @@ class TestDiscord:
 class TestDiscordPayloads:
     """Payload content and allowed_mentions."""
 
-    ITEM = {
+    ITEM: ClassVar[dict[str, Any]] = {
         "Title": "Test",
         "Colour": 0x00FF00,
         "URL": "https://test.com",
@@ -342,6 +346,20 @@ class TestDiscordPayloads:
         return DeliveryResult(
             status=DeliveryStatus.SUCCESS, messenger_name="d", http_status=200
         )
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_embed_has_utc_timestamp_and_plain_footer(self, mock_post):
+        mock_post.return_value = self._ok()
+
+        self._discord().send_embed_message(self.ITEM)
+
+        embed = mock_post.call_args.kwargs["json"]["embeds"][0]
+        parsed = datetime.fromisoformat(embed["timestamp"])
+        assert parsed.utcoffset() == timedelta(0)
+        assert abs(datetime.now(UTC) - parsed) < timedelta(minutes=1)
+        assert embed["footer"]["text"] == "Amiibot"
+        assert not any(ch.isdigit() for ch in embed["footer"]["text"])
+        assert embed["footer"]["icon_url"]
 
     @patch("messenger.discord.Discord.send_post")
     def test_send_message_after_embed_does_not_resend_embeds(self, mock_post):

@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from utils import JSONFormatter
 
@@ -52,9 +52,7 @@ class TestJSONFormatter:
         monkeypatch.setenv("TZ", "Europe/London")
         time.tzset()
         try:
-            created = datetime(
-                2026, 10, 6, 18, 53, 38, 123000, tzinfo=timezone.utc
-            ).timestamp()
+            created = datetime(2026, 10, 6, 18, 53, 38, 123000, tzinfo=UTC).timestamp()
             formatter = JSONFormatter()
             record = logging.LogRecord(
                 name="t",
@@ -198,10 +196,9 @@ class TestRedactionEndToEnd:
             try:
                 raise RuntimeError(f"POST {secret_url} failed")
             except RuntimeError as e:
-                logger.error(
+                logger.exception(
                     "Delivery failed: %s",
-                    e,
-                    exc_info=True,
+                    e,  # noqa: TRY401 - the secret must also be in the message
                     extra={"target": secret_url},
                 )
         finally:
@@ -220,7 +217,7 @@ class TestRedactionEndToEnd:
             try:
                 raise RuntimeError(secret_url)
             except RuntimeError:
-                logger.error("Failed", exc_info=True)
+                logger.exception("Failed")
         finally:
             logger.removeHandler(handler)
 

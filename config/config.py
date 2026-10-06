@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from enum import Enum
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -55,10 +55,10 @@ def _redact(value: str) -> str:
 
 class DatabaseConfig(BaseModel, use_enum_values=True, extra="forbid"):
     engine: str = Databases.SQLITE  # type: ignore
-    username: Optional[str] = None
-    password: Optional[str] = None
-    host: Optional[str | IPvAnyAddress] = "127.0.0.1"
-    port: Optional[int] = Field(5432, ge=1, le=65535)
+    username: str | None = None
+    password: str | None = None
+    host: str | IPvAnyAddress | None = "127.0.0.1"
+    port: int | None = Field(5432, ge=1, le=65535)
     name: str = "amiiboalert"
 
     def resolve_secrets(self) -> None:
@@ -173,7 +173,7 @@ class Config(BaseModel, use_enum_values=True, extra="forbid"):
     messengers: dict[
         str,
         Annotated[
-            Union[DiscordMessengerConfig, TelegramMessengerConfig],
+            DiscordMessengerConfig | TelegramMessengerConfig,
             Field(discriminator="messenger_type"),
         ],
     ]

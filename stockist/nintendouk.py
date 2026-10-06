@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from stockist.stockist import Stock, Stockist
 
@@ -16,15 +17,19 @@ _AVAILABILITY: dict[str, tuple[Stock, int]] = {
 }
 
 
+_UK_TZ = ZoneInfo("Europe/London")
+
+
 def _format_release_date(value: Any) -> str | None:
     """Format a "YYYY-MM-DD" release date, or None unless it is today or later."""
     if not isinstance(value, str):
         return None
     try:
-        release = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+        release = date.fromisoformat(value.strip())
     except ValueError:
         return None
-    if release < date.today():
+    # Nintendo UK is a UK store, so "today" is the date in London.
+    if release < datetime.now(_UK_TZ).date():
         return None
     return f"{release.day} {release.strftime('%b %Y')}"
 

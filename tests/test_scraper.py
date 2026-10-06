@@ -1,10 +1,12 @@
-import pytest
-from unittest.mock import Mock, patch
-from scraper import Scraper
-from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus
-from scraper import CycleStats
-from datetime import datetime, timedelta
+from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import pytest
+
+from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus
+from scraper import CycleStats, Scraper
+from timeutil import utcnow
 
 
 def _outbox_row(item, row_id=1, **overrides):
@@ -20,7 +22,7 @@ def _outbox_row(item, row_id=1, **overrides):
         release_date=item.get("Release"),
         status="pending",
         attempts=0,
-        created_at=datetime.now(),
+        created_at=utcnow(),
     )
     for k, v in overrides.items():
         setattr(row, k, v)
@@ -146,9 +148,9 @@ class TestScraper:
 
     @patch("time.sleep")
     def test_scrape_stockist_max_retries(self, mock_sleep, scraper, mock_stockist):
-        mock_stockist.get_amiibo.side_effect = Exception("Always fails")
+        mock_stockist.get_amiibo.side_effect = RuntimeError("Always fails")
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError, match="Always fails"):
             scraper._scrape_stockist(mock_stockist)
 
         assert mock_stockist.get_amiibo.call_count == 3
@@ -545,7 +547,7 @@ class TestScraperOutboxDelivery:
         with database.Session() as session:
             for item in session.query(AmiiboStock).all():
                 if item.last_notified_at:
-                    item.last_notified_at = datetime.now() - timedelta(hours=2)
+                    item.last_notified_at = utcnow() - timedelta(hours=2)
             session.commit()
 
     @staticmethod
@@ -788,7 +790,7 @@ class TestScraperOutboxDelivery:
                     price="$1",
                     image="i",
                     colour=1,
-                    created_at=datetime.now() - timedelta(hours=25),
+                    created_at=utcnow() - timedelta(hours=25),
                 )
             )
             session.commit()
@@ -800,6 +802,33 @@ class TestScraperOutboxDelivery:
         row = self._rows(database)[0]
         assert row.status == "expired"
         assert row.completed_at is not None
+
+    def test_recent_row_is_delivered_not_expired(self, database):
+        from database import NotificationOutbox
+
+        m = self._messenger()
+        holder = {"items": []}
+        scraper, _ = self._build(database, [m], holder)
+        with database.Session() as session:
+            session.add(
+                NotificationOutbox(
+                    website="t.com",
+                    url="https://t.com/1",
+                    title="Fresh",
+                    stock_status="In stock",
+                    price="$1",
+                    image="i",
+                    colour=1,
+                    created_at=utcnow() - timedelta(hours=1),
+                )
+            )
+            session.commit()
+
+        result = scraper.scrape_cycle()
+
+        assert result.notifications_sent == 1
+        m.send_embed_message.assert_called_once()
+        assert self._rows(database)[0].status == "done"
 
     def test_row_at_max_attempts_is_expired_not_sent(self, database):
         from constants import OUTBOX_MAX_ATTEMPTS

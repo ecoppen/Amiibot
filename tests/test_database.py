@@ -2,17 +2,23 @@
 Unit tests for database module.
 """
 
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
+
 import pytest
-from datetime import datetime, timedelta
+import sqlalchemy as sa
+
+from config.config import DatabaseConfig
 from database import (
+    AmiiboStock,
     Database,
     LastScraped,
-    AmiiboStock,
     NotificationDelivery,
     NotificationOutbox,
     ScrapingFailure,
+    UTCDateTime,
 )
-from config.config import DatabaseConfig
+from timeutil import utcnow
 
 
 class TestDatabase:
@@ -30,18 +36,11 @@ class TestDatabase:
 
     @pytest.fixture
     def database(self, db_config):
-        import os
-
         db = Database(db_config)
         db.ensure_schema()
         yield db
         db.engine.dispose()
-        try:
-            db_file = f"{db_config.name}.db"
-            if os.path.exists(db_file):
-                os.remove(db_file)
-        except Exception:
-            pass
+        Path(f"{db_config.name}.db").unlink(missing_ok=True)
 
     def test_database_initialization(self, database):
         """Test database initializes correctly."""
@@ -520,7 +519,7 @@ class TestOutboxChangeDetection:
         with database.Session() as session:
             for item in session.query(AmiiboStock).all():
                 if item.last_notified_at:
-                    item.last_notified_at = datetime.now() - timedelta(hours=2)
+                    item.last_notified_at = utcnow() - timedelta(hours=2)
             session.commit()
 
     def test_new_items_enqueue_outbox_rows(self, database):
@@ -862,6 +861,141 @@ class TestOutboxChangeDetection:
         assert self._item(database, "https://t.com/1").Stock == "Out of Stock"
 
 
+_NAIVE = datetime(2026, 1, 1)  # noqa: DTZ001 - deliberately naive
+
+
+class TestUTCDateTime:
+    """Aware UTC in Python, naive UTC in the database."""
+
+    @pytest.fixture
+    def database(self):
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_utc_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        Path(f"{config.name}.db").unlink(missing_ok=True)
+
+    @staticmethod
+    def _add_outbox(database, created_at):
+        with database.Session() as session:
+            row = NotificationOutbox(
+                website="t.com",
+                url="https://t.com/1",
+                title="T",
+                stock_status="In stock",
+                created_at=created_at,
+            )
+            session.add(row)
+            session.commit()
+            return row.id
+
+    @staticmethod
+    def _raw_created_at(database, row_id):
+        with database.engine.connect() as conn:
+            return conn.execute(
+                sa.text("SELECT created_at FROM notification_outbox WHERE id = :i"),
+                {"i": row_id},
+            ).scalar_one()
+
+    def test_utcnow_is_aware_utc(self):
+        now = utcnow()
+        assert now.tzinfo is UTC
+        assert abs(datetime.now(UTC) - now) < timedelta(seconds=5)
+
+    def test_aware_in_gives_aware_utc_out(self, database):
+        moment = datetime(2026, 10, 6, 12, 30, 15, 250000, tzinfo=UTC)
+        row_id = self._add_outbox(database, moment)
+
+        with database.Session() as session:
+            loaded = session.get(NotificationOutbox, row_id).created_at
+        assert loaded == moment
+        assert loaded.utcoffset() == timedelta(0)
+
+    def test_non_utc_aware_value_is_converted_to_utc(self, database):
+        plus_five = timezone(timedelta(hours=5))
+        row_id = self._add_outbox(
+            database, datetime(2026, 10, 6, 17, 30, tzinfo=plus_five)
+        )
+
+        with database.Session() as session:
+            loaded = session.get(NotificationOutbox, row_id).created_at
+        assert loaded == datetime(2026, 10, 6, 12, 30, tzinfo=UTC)
+        assert loaded.utcoffset() == timedelta(0)
+        # Stored naive, in UTC.
+        stored = self._raw_created_at(database, row_id)
+        assert "2026-10-06 12:30:00" in str(stored)
+
+    def test_naive_value_from_older_code_reads_back_aware(self, database):
+        row_id = self._add_outbox(database, utcnow())
+        with database.engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "UPDATE notification_outbox SET created_at = '2026-01-02 03:04:05.000000'"
+                    " WHERE id = :i"
+                ),
+                {"i": row_id},
+            )
+
+        with database.Session() as session:
+            loaded = session.get(NotificationOutbox, row_id).created_at
+        assert loaded == datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+    def test_none_passes_through(self, database):
+        with database.Session() as session:
+            row = NotificationOutbox(
+                website="t.com",
+                url="u",
+                title="T",
+                stock_status="In stock",
+            )
+            session.add(row)
+            session.commit()
+            assert row.last_attempt_at is None
+            assert row.created_at.tzinfo is UTC
+
+    def test_naive_input_is_rejected(self):
+        with pytest.raises(ValueError, match="naive datetime"):
+            UTCDateTime().process_bind_param(_NAIVE, None)
+
+    def test_naive_value_is_rejected_by_the_database_layer(self, database):
+        with pytest.raises(sa.exc.StatementError, match="naive datetime"):
+            self._add_outbox(database, _NAIVE)
+
+    def test_every_datetime_column_uses_utc_datetime(self):
+        from database import Base
+
+        checked = 0
+        for table in Base.metadata.tables.values():
+            for column in table.columns:
+                name = f"{table.name}.{column.name}"
+                assert not isinstance(column.type, sa.DateTime), name
+                if isinstance(column.type, UTCDateTime):
+                    checked += 1
+        assert checked >= 13
+
+    def test_state_columns_round_trip_aware(self, database):
+        database.record_scrape_attempt("t.com")
+        database.record_healthy_scrape("t.com", 3)
+        database.record_scraping_failure("t.com")
+        database.check_then_add_or_update_amiibo([_datum("https://t.com/1")])
+        with database.Session() as session:
+            values = [
+                session.query(LastScraped).one().last_attempt_at,
+                session.query(LastScraped).one().last_success_at,
+                session.query(ScrapingFailure).one().last_failure,
+                session.query(AmiiboStock).one().timestamp,
+                session.query(AmiiboStock).one().first_seen_at,
+                session.query(AmiiboStock).one().last_notified_at,
+                session.query(NotificationOutbox).one().created_at,
+            ]
+        assert all(v.tzinfo is UTC for v in values)
+
+
 class TestOutboxStorage:
     @pytest.fixture
     def database(self):
@@ -890,15 +1024,15 @@ class TestOutboxStorage:
                 image="img",
                 colour=1,
                 status=status,
-                created_at=created_at or datetime.now(),
+                created_at=created_at or utcnow(),
             )
             session.add(row)
             session.commit()
             return row.id
 
     def test_get_pending_outbox_oldest_first_and_filtered(self, database):
-        newer = self._add_row(database, created_at=datetime.now())
-        older = self._add_row(database, created_at=datetime.now() - timedelta(hours=1))
+        newer = self._add_row(database, created_at=utcnow())
+        older = self._add_row(database, created_at=utcnow() - timedelta(hours=1))
         self._add_row(database, website="other.com")
         self._add_row(database, status="done")
 
@@ -936,14 +1070,14 @@ class TestOutboxStorage:
             database.complete_outbox(row_id, "pending")
 
     def test_record_delivery_upserts_transient_to_success(self, database):
-        kwargs = dict(
-            idempotency_key="outbox:1",
-            website="t.com",
-            url="https://t.com/1",
-            title="T",
-            stock_status="In stock",
-            messenger_name="discord",
-        )
+        kwargs = {
+            "idempotency_key": "outbox:1",
+            "website": "t.com",
+            "url": "https://t.com/1",
+            "title": "T",
+            "stock_status": "In stock",
+            "messenger_name": "discord",
+        }
         database.record_delivery(delivery_status="transient_failure", **kwargs)
         assert (
             database.get_delivery_status("outbox:1", "discord") == "transient_failure"
@@ -957,16 +1091,18 @@ class TestOutboxStorage:
 
 
 class TestOutboxMigration:
-    NEW_COLUMNS = {
-        "price",
-        "image",
-        "colour",
-        "status",
-        "attempts",
-        "last_attempt_at",
-        "completed_at",
-        "release_date",
-    }
+    NEW_COLUMNS = frozenset(
+        {
+            "price",
+            "image",
+            "colour",
+            "status",
+            "attempts",
+            "last_attempt_at",
+            "completed_at",
+            "release_date",
+        }
+    )
 
     @pytest.fixture
     def database(self):

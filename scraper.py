@@ -1,7 +1,7 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from constants import (
@@ -17,6 +17,7 @@ from constants import (
 from database import OUTBOX_DONE, OUTBOX_EXPIRED, ScrapingRecovery
 from models import deduplicate_by_url, validate_products
 from result import DeliveryStatus, FailureCategory, RunResult, RunStatus
+from timeutil import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -84,8 +85,8 @@ class Scraper:
                 notifications_sent=cycle.notifications_sent,
                 errors=errors,
             )
-        except Exception as e:
-            log.error(f"Scrape cycle failed: {e}", exc_info=True)
+        except Exception as e:  # safety boundary: map any failure to a RunResult
+            log.exception("Scrape cycle failed")
             return RunResult(
                 status=RunStatus.FAILURE,
                 exit_code=3,
@@ -97,7 +98,7 @@ class Scraper:
         for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
             try:
                 return stockist.get_amiibo()
-            except Exception as e:
+            except Exception as e:  # any stockist error is retried, then re-raised
                 log.warning(
                     f"Error scraping {stockist.name} "
                     f"(attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {e}"
@@ -152,7 +153,7 @@ class Scraper:
         try:
             scraped = self._scrape_stockist(stockist)
         except Exception as e:
-            log.error(f"Error scraping {stockist.name}: {e}", exc_info=True)
+            log.exception(f"Error scraping {stockist.name}")
             elapsed = time.monotonic() - start_time
 
             failure_count = self.database.record_scraping_failure(stockist.name)
@@ -255,11 +256,8 @@ class Scraper:
                 self._notify_recovery(stockist, result)
             else:
                 self._notify_failure(stockist, result)
-        except Exception as e:
-            log.error(
-                f"Error sending health message for {stockist.name}: {e}",
-                exc_info=True,
-            )
+        except Exception:  # never let health messaging abort the scrape cycle
+            log.exception(f"Error sending health message for {stockist.name}")
 
     def _send_system_message(self, stockist: Any, message: str) -> bool:
         """Send a plain text message to the stockist's messengers.
@@ -273,7 +271,9 @@ class Scraper:
                 continue
             try:
                 result = messenger.send_message(message)
-            except Exception as e:
+            # Safety boundary: never let a notification failure abort the
+            # scrape cycle.
+            except Exception as e:  # noqa: BLE001 - safety boundary
                 log.error(f"{messenger.name} failed to send a health message: {e}")
                 continue
             if result.status == DeliveryStatus.SUCCESS:
@@ -313,11 +313,8 @@ class Scraper:
     def _safe_flush_outbox(self, stockist: Any) -> int:
         try:
             return self._flush_outbox(stockist)
-        except Exception as e:
-            log.error(
-                f"Error flushing notifications for {stockist.name}: {e}",
-                exc_info=True,
-            )
+        except Exception:  # never let a notification failure abort the scrape cycle
+            log.exception(f"Error flushing notifications for {stockist.name}")
             return 0
 
     def _flush_outbox(self, stockist: Any) -> int:
@@ -336,7 +333,7 @@ class Scraper:
 
         for row in pending:
             if (
-                datetime.now() - row.created_at > max_age
+                utcnow() - row.created_at > max_age
                 or row.attempts >= OUTBOX_MAX_ATTEMPTS
             ):
                 log.warning(

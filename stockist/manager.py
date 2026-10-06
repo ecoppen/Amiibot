@@ -54,7 +54,7 @@ class StockistManager:
                 stockist_instance = stockist_class(messengers=messenger_names)
                 self.all_stockists.append(stockist_instance)
                 log.info(f"Now tracking {stockist_url}")
-            except Exception as e:
+            except (TypeError, ValueError) as e:
                 log.error(f"Failed to instantiate stockist {stockist_url}: {e}")
 
         self._validate_stockists()

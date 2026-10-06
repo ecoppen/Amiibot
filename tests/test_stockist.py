@@ -2,23 +2,32 @@
 Unit tests for stockist module.
 """
 
-import pytest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
-from stockist.stockist import Stockist, Stock
-from stockist.manager import StockistManager, STOCKIST_FACTORY
-from stockist.utils import send_public_request
+from zoneinfo import ZoneInfo
+
+import pytest
+import requests
+from selenium.common.exceptions import WebDriverException
+
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
 from stockist.cexuk import CexUK
 from stockist.game import Game
 from stockist.gamestop import Gamestop
+from stockist.manager import STOCKIST_FACTORY, StockistManager
 from stockist.mecchajapan import MecchaJapan
 from stockist.nintendouk import NintendoUK
 from stockist.playasia import PlayAsia
 from stockist.shopto import Shopto
+from stockist.stockist import Stock, Stockist
 from stockist.thesource import TheSource
-import requests
+from stockist.utils import send_public_request
+
+
+def _uk_today() -> date:
+    """Today in the UK, which is what the Nintendo UK parser compares against."""
+    return datetime.now(ZoneInfo("Europe/London")).date()
 
 
 class TestStock:
@@ -106,8 +115,6 @@ class TestStockist:
         self, mock_wait, mock_chrome, stockist
     ):
         """Test WebDriverException returns empty string."""
-        from selenium.common.exceptions import WebDriverException
-
         mock_wait.return_value.until.side_effect = WebDriverException("no driver")
         mock_driver = Mock()
         mock_chrome.return_value = mock_driver
@@ -116,13 +123,19 @@ class TestStockist:
 
         assert result == ""
 
+    @pytest.mark.parametrize(
+        "error",
+        [WebDriverException("quit failed"), OSError("quit failed")],
+    )
     @patch("stockist.stockist.webdriver.Chrome")
     @patch("stockist.stockist.WebDriverWait")
-    def test_scrape_with_selenium_quit_error(self, mock_wait, mock_chrome, stockist):
+    def test_scrape_with_selenium_quit_error(
+        self, mock_wait, mock_chrome, stockist, error
+    ):
         """Test quit errors are caught."""
         mock_driver = Mock()
         mock_driver.page_source = "<html>test</html>"
-        mock_driver.quit.side_effect = Exception("quit failed")
+        mock_driver.quit.side_effect = error
         mock_chrome.return_value = mock_driver
 
         result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
@@ -606,27 +619,29 @@ class TestNintendoUKAvailability:
         assert len(warnings) == 1
 
     def test_future_release_date_is_formatted(self):
-        future = date.today() + timedelta(days=30)
+        future = _uk_today() + timedelta(days=30)
         result = self._scrape(
             [self._product("PreOrder", c_releaseDate=future.isoformat())]
         )
         assert result[0]["Release"] == f"{future.day} {future.strftime('%b %Y')}"
 
     def test_release_date_format_example(self):
-        with patch("stockist.nintendouk.date") as mock_date:
-            mock_date.today.return_value = date(2026, 1, 1)
+        with patch("stockist.nintendouk.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(
+                2026, 1, 1, 12, tzinfo=ZoneInfo("Europe/London")
+            )
             result = self._scrape(
                 [self._product("PreOrder", c_releaseDate="2026-11-12")]
             )
         assert result[0]["Release"] == "12 Nov 2026"
 
     def test_release_date_today_is_kept(self):
-        today = date.today()
+        today = _uk_today()
         result = self._scrape([self._product(c_releaseDate=today.isoformat())])
         assert "Release" in result[0]
 
     def test_past_release_date_is_omitted(self):
-        past = date.today() - timedelta(days=1)
+        past = _uk_today() - timedelta(days=1)
         result = self._scrape([self._product(c_releaseDate=past.isoformat())])
         assert "Release" not in result[0]
 
@@ -646,7 +661,7 @@ class TestStockistIntegration:
 
     def test_all_stockists_have_required_attributes(self):
         """Test all stockists have required attributes."""
-        for stockist_url, stockist_class in STOCKIST_FACTORY.items():
+        for stockist_class in STOCKIST_FACTORY.values():
             stockist = stockist_class(messengers=["test"])
 
             assert hasattr(stockist, "name")

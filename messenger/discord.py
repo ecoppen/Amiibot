@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime
 from typing import Any
 
 from messenger.messenger import Messenger
 from result import DeliveryResult, DeliveryStatus
 from stockist.stockist import URGENT_STATUSES
+from timeutil import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -65,10 +65,9 @@ class Discord(Messenger):
             embed[k] = v
         for k, v in payload.items():
             embed["fields"].append({"name": k, "value": f"{v}", "inline": True})
-        embed["footer"] = {
-            "text": f"Amiibot - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "icon_url": AVATAR_URL,
-        }
+        # Discord renders the timestamp in each viewer's local time.
+        embed["timestamp"] = utcnow().isoformat()
+        embed["footer"] = {"text": "Amiibot", "icon_url": AVATAR_URL}
 
         data = self._new_payload("Stock alert")
         if self.mention and embed_data.get("Stock") in URGENT_STATUSES:

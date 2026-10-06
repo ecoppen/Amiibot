@@ -2,10 +2,12 @@
 Unit tests for configuration module.
 """
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from config.config import load_config
 
 

@@ -3,6 +3,7 @@ import re
 from pydantic import (
     BaseModel,
     Field,
+    ValidationError,
     field_validator,
 )
 
@@ -49,7 +50,7 @@ def _strip_control_characters(text: str) -> str:
         import logging
 
         log = logging.getLogger(__name__)
-        log.warning(f"Stripped control characters from field: {repr(text[:80])}")
+        log.warning(f"Stripped control characters from field: {text[:80]!r}")
     return stripped
 
 
@@ -77,6 +78,6 @@ def validate_products(
     for idx, item in enumerate(products):
         try:
             valid.append(ScrapedProduct(**item).model_dump(exclude_none=True))
-        except Exception as e:
+        except (ValidationError, TypeError) as e:
             errors.append(f"item {idx}: {e}")
     return valid, errors
