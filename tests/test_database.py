@@ -4,7 +4,14 @@ Unit tests for database module.
 
 import pytest
 from datetime import datetime, timedelta
-from database import Database, LastScraped, AmiiboStock, ScrapingFailure
+from database import (
+    Database,
+    LastScraped,
+    AmiiboStock,
+    NotificationDelivery,
+    NotificationOutbox,
+    ScrapingFailure,
+)
 from config.config import DatabaseConfig
 
 
@@ -438,12 +445,20 @@ class TestDatabase:
         ]
         database.check_then_add_or_update_amiibo(data)
 
-        # Should not be suppressed initially (no prior notification)
-        assert not database.should_suppress_notification(
+        # Enqueueing the new item's event already recorded a notification
+        assert database.should_suppress_notification(
             "https://test.com/notify", "test_notify.com", "In stock"
         )
 
-        # Record a notification
+        # Clear it, then record a notification explicitly
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            item.last_notified_at = None
+            item.last_notified_status = None
+            session.commit()
+        assert not database.should_suppress_notification(
+            "https://test.com/notify", "test_notify.com", "In stock"
+        )
         database.record_notification(
             "https://test.com/notify", "test_notify.com", "In stock"
         )
@@ -551,29 +566,11 @@ class TestDatabase:
 
         assert second_failure_time > first_failure_time
 
-    def test_build_idempotency_key_stable(self, database):
-        """Test idempotency keys are stable and unique."""
-        key1 = database.build_idempotency_key(
-            url="https://test.com/1", website="test.com", stock_status="In stock"
-        )
-        key2 = database.build_idempotency_key(
-            url="https://test.com/1", website="test.com", stock_status="In stock"
-        )
-        key3 = database.build_idempotency_key(
-            url="https://test.com/1", website="test.com", stock_status="Out of Stock"
-        )
-
-        assert key1 == key2
-        assert key1 != key3
-        assert len(key1) == 32
-
     def test_record_delivery_and_was_delivered(self, database):
         """Test delivery recording and lookup."""
         from result import DeliveryStatus
 
-        key = database.build_idempotency_key(
-            url="https://test.com/1", website="test.com", stock_status="In stock"
-        )
+        key = "outbox:1"
 
         assert database.was_delivered_to(key, "discord") is False
 
@@ -649,3 +646,466 @@ class TestDatabase:
         with database.Session() as session:
             item = session.query(AmiiboStock).first()
             assert item is None or item.Website is not None
+
+
+def _datum(url="https://t.com/1", stock="In stock", price="$19.99", colour=0x00FF00):
+    return {
+        "Title": f"Amiibo {url[-1]}",
+        "Price": price,
+        "Stock": stock,
+        "URL": url,
+        "Website": "t.com",
+        "Image": "https://t.com/img.jpg",
+        "Colour": colour,
+    }
+
+
+class TestOutboxChangeDetection:
+    """Change detection, atomic outbox enqueueing and cooldown behaviour."""
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_outbox_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _outbox(database):
+        with database.Session() as session:
+            return (
+                session.query(NotificationOutbox).order_by(NotificationOutbox.id).all()
+            )
+
+    @staticmethod
+    def _item(database, url="https://t.com/1"):
+        with database.Session() as session:
+            return session.query(AmiiboStock).filter_by(URL=url).one()
+
+    @staticmethod
+    def _expire_cooldown(database):
+        with database.Session() as session:
+            for item in session.query(AmiiboStock).all():
+                if item.last_notified_at:
+                    item.last_notified_at = datetime.now() - timedelta(hours=2)
+            session.commit()
+
+    def test_new_items_enqueue_outbox_rows(self, database):
+        events = database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")]
+        )
+        assert len(events) == 2
+        rows = self._outbox(database)
+        assert len(rows) == 2
+        row = rows[0]
+        assert row.status == "pending"
+        assert row.attempts == 0
+        assert row.price == "$19.99"
+        assert row.image == "https://t.com/img.jpg"
+        assert row.colour == 0x00FF00
+        assert row.stock_status == "In stock"
+        assert row.website == "t.com"
+
+    def test_new_item_on_existing_website_enqueues(self, database):
+        database.check_then_add_or_update_amiibo([_datum("https://t.com/1")])
+        events = database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")]
+        )
+        assert [e["URL"] for e in events] == ["https://t.com/2"]
+        assert len(self._outbox(database)) == 2
+
+    def test_restock_emits_in_stock_event(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        events = database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        assert len(events) == 1
+        assert events[0]["Stock"] == "In stock"
+        assert events[0]["Colour"] == 0x00FF00
+        assert events[0]["Price"] == "$19.99"
+        rows = self._outbox(database)
+        assert [r.stock_status for r in rows] == ["Out of Stock", "In stock"]
+        assert rows[1].colour == 0x00FF00
+        item = self._item(database)
+        assert item.Stock == "In stock"
+        assert int(item.Colour) == 0x00FF00
+
+    def test_sellout_emits_out_of_stock_event(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        assert len(events) == 1
+        assert events[0]["Stock"] == "Out of Stock"
+        assert events[0]["Colour"] == 0xFF0000
+        assert self._item(database).Stock == "Out of Stock"
+        assert len(self._outbox(database)) == 2
+
+    def test_unchanged_item_emits_nothing(self, database):
+        database.check_then_add_or_update_amiibo([_datum()])
+        assert database.check_then_add_or_update_amiibo([_datum()]) == []
+        assert len(self._outbox(database)) == 1
+
+    def test_stock_and_price_change_emit_single_event(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", price="$19.99")]
+        )
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="In stock", price="$24.99")]
+        )
+        assert len(events) == 1
+        assert events[0]["Stock"] == "In stock"
+        assert events[0]["Price"] == "$24.99"
+        item = self._item(database)
+        assert item.Stock == "In stock"
+        assert item.Price == "$24.99"
+        assert len(self._outbox(database)) == 2
+
+    def test_two_price_changes_produce_two_distinct_outbox_rows(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="$19.99")])
+        database.check_then_add_or_update_amiibo([_datum(price="$24.99")])
+        self._expire_cooldown(database)
+        events = database.check_then_add_or_update_amiibo([_datum(price="$29.99")])
+
+        assert len(events) == 1
+        rows = [r for r in self._outbox(database) if r.stock_status == "Price change"]
+        assert [r.price for r in rows] == ["$24.99", "$29.99"]
+        assert len({f"outbox:{r.id}" for r in rows}) == 2
+
+    def test_price_change_within_cooldown_is_suppressed(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="$19.99")])
+        database.check_then_add_or_update_amiibo([_datum(price="$24.99")])
+        events = database.check_then_add_or_update_amiibo([_datum(price="$29.99")])
+
+        assert events == []
+        # State is still tracked even though no notification was queued.
+        assert self._item(database).Price == "$29.99"
+        assert (
+            len([r for r in self._outbox(database) if r.stock_status == "Price change"])
+            == 1
+        )
+
+    def test_restock_sellout_restock_emits_each_transition(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        statuses = []
+        for stock in ["In stock", "Out of Stock", "In stock"]:
+            self._expire_cooldown(database)
+            events = database.check_then_add_or_update_amiibo([_datum(stock=stock)])
+            statuses.extend(e["Stock"] for e in events)
+        assert statuses == ["In stock", "Out of Stock", "In stock"]
+
+    def test_in_stock_never_suppressed_by_cooldown(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+        returned = []
+        for stock in ["Out of Stock", "In stock"]:
+            returned.extend(
+                database.check_then_add_or_update_amiibo([_datum(stock=stock)])
+            )
+
+        assert [e["Stock"] for e in returned] == ["Out of Stock", "In stock"]
+        rows = self._outbox(database)
+        assert [r.stock_status for r in rows] == [
+            "In stock",
+            "Out of Stock",
+            "In stock",
+        ]
+        item = self._item(database)
+        assert item.last_notified_status == "In stock"
+        assert item.last_notified_at is not None
+
+    def test_stock_flap_within_cooldown_tracks_state_and_notifies(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        returned = []
+        for stock in ["In stock", "Out of Stock", "In stock", "Out of Stock"]:
+            events = database.check_then_add_or_update_amiibo([_datum(stock=stock)])
+            returned.extend(e["Stock"] for e in events)
+            # Stored state follows the scrape whether or not an event was queued.
+            assert self._item(database).Stock == stock
+
+        # Each in-stock event records "In stock" as the last notified status, so
+        # no Out of Stock transition here repeats the last notified status.
+        assert returned == ["In stock", "Out of Stock", "In stock", "Out of Stock"]
+        assert len(self._outbox(database)) == 5
+
+    def test_out_of_stock_still_subject_to_cooldown(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        event = _datum(stock="Out of Stock")
+        in_stock_event = _datum(stock="In stock")
+
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            # Same status within the cooldown is suppressed ...
+            assert item.last_notified_status == "Out of Stock"
+            assert database._enqueue_event(session, event, item) is False
+            # ... but an in-stock event is not, even when it repeats.
+            item.last_notified_status = "In stock"
+            assert database._enqueue_event(session, in_stock_event, item) is True
+            assert database._enqueue_event(session, in_stock_event, item) is True
+            session.commit()
+
+        assert len(self._outbox(database)) == 3
+
+    def test_new_item_not_suppressed_by_cooldown(self, database):
+        database.check_then_add_or_update_amiibo([_datum("https://t.com/1")])
+        events = database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")]
+        )
+        assert len(events) == 1
+
+    def test_delisted_item_emits_exactly_one_delisted_event(self, database):
+        keep = _datum("https://t.com/1")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+
+        delisted = []
+        for _ in range(6):
+            events = database.check_then_add_or_update_amiibo([keep])
+            delisted.extend(e for e in events if e["Stock"] == "Delisted")
+
+        assert len(delisted) == 1
+        assert delisted[0]["URL"] == "https://t.com/2"
+        item = self._item(database, "https://t.com/2")
+        assert item.is_active is False
+        assert item.delisted_at is not None
+        # missed_count is no longer incremented once the item is inactive.
+        assert item.missed_count == 2
+        assert (
+            len([r for r in self._outbox(database) if r.stock_status == "Delisted"])
+            == 1
+        )
+
+    def test_delisted_item_reappearing_is_reactivated_and_emits(self, database):
+        keep = _datum("https://t.com/1")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+        for _ in range(3):
+            database.check_then_add_or_update_amiibo([keep])
+
+        events = database.check_then_add_or_update_amiibo(
+            [keep, _datum("https://t.com/2", stock="Out of Stock", colour=0xFF0000)]
+        )
+
+        assert len(events) == 1
+        assert events[0]["URL"] == "https://t.com/2"
+        assert events[0]["Stock"] == "Out of Stock"
+        assert events[0]["Colour"] == 0xFF0000
+        item = self._item(database, "https://t.com/2")
+        assert item.is_active is True
+        assert item.delisted_at is None
+        assert item.missed_count == 0
+        assert item.Stock == "Out of Stock"
+
+    def test_reappearing_in_stock_item_emits_in_stock(self, database):
+        keep = _datum("https://t.com/1")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+        for _ in range(2):
+            database.check_then_add_or_update_amiibo([keep])
+        events = database.check_then_add_or_update_amiibo([keep, gone])
+        assert [e["Stock"] for e in events] == ["In stock"]
+
+    def test_skip_delisting_does_not_touch_inactive_items(self, database):
+        keep = _datum("https://t.com/1")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+        for _ in range(2):
+            database.check_then_add_or_update_amiibo([keep])
+        events = database.check_then_add_or_update_amiibo([keep], skip_delisting=True)
+        assert events == []
+
+    def test_state_and_outbox_roll_back_together(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1", stock="Out of Stock"), _datum("https://t.com/2")]
+        )
+        before = len(self._outbox(database))
+        with pytest.raises(ValueError):
+            database.check_then_add_or_update_amiibo(
+                [
+                    _datum("https://t.com/1", stock="In stock"),
+                    _datum("https://t.com/2", price="not a price"),
+                ]
+            )
+        assert len(self._outbox(database)) == before
+        assert self._item(database, "https://t.com/1").Stock == "Out of Stock"
+
+
+class TestOutboxStorage:
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_outbox_store_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _add_row(database, website="t.com", created_at=None, status="pending"):
+        with database.Session() as session:
+            row = NotificationOutbox(
+                website=website,
+                url="https://t.com/1",
+                title="T",
+                stock_status="In stock",
+                price="$1",
+                image="img",
+                colour=1,
+                status=status,
+                created_at=created_at or datetime.now(),
+            )
+            session.add(row)
+            session.commit()
+            return row.id
+
+    def test_get_pending_outbox_oldest_first_and_filtered(self, database):
+        newer = self._add_row(database, created_at=datetime.now())
+        older = self._add_row(database, created_at=datetime.now() - timedelta(hours=1))
+        self._add_row(database, website="other.com")
+        self._add_row(database, status="done")
+
+        rows = database.get_pending_outbox("t.com")
+        assert [r.id for r in rows] == [older, newer]
+
+    def test_mark_outbox_attempt(self, database):
+        row_id = self._add_row(database)
+        database.mark_outbox_attempt(row_id)
+        database.mark_outbox_attempt(row_id)
+        row = database.get_pending_outbox("t.com")[0]
+        assert row.attempts == 2
+        assert row.last_attempt_at is not None
+
+    def test_mark_outbox_attempt_unknown_id_is_noop(self, database):
+        database.mark_outbox_attempt(9999)
+        database.complete_outbox(9999)
+
+    def test_complete_outbox_done_and_expired(self, database):
+        done_id = self._add_row(database)
+        expired_id = self._add_row(database)
+        database.complete_outbox(done_id, "done")
+        database.complete_outbox(expired_id, "expired")
+
+        assert database.get_pending_outbox("t.com") == []
+        with database.Session() as session:
+            done = session.get(NotificationOutbox, done_id)
+            expired = session.get(NotificationOutbox, expired_id)
+            assert done.status == "done" and done.completed_at is not None
+            assert expired.status == "expired" and expired.completed_at is not None
+
+    def test_complete_outbox_rejects_pending(self, database):
+        row_id = self._add_row(database)
+        with pytest.raises(ValueError):
+            database.complete_outbox(row_id, "pending")
+
+    def test_record_delivery_upserts_transient_to_success(self, database):
+        kwargs = dict(
+            idempotency_key="outbox:1",
+            website="t.com",
+            url="https://t.com/1",
+            title="T",
+            stock_status="In stock",
+            messenger_name="discord",
+        )
+        database.record_delivery(delivery_status="transient_failure", **kwargs)
+        assert database.was_delivered_to("outbox:1", "discord") is False
+        assert (
+            database.get_delivery_status("outbox:1", "discord") == "transient_failure"
+        )
+
+        database.record_delivery(delivery_status="success", **kwargs)
+        assert database.was_delivered_to("outbox:1", "discord") is True
+        assert database.get_delivery_status("outbox:1", "discord") == "success"
+        assert database.get_delivery_status("outbox:1", "telegram") is None
+        with database.Session() as session:
+            assert session.query(NotificationDelivery).count() == 1
+
+
+class TestOutboxMigration:
+    NEW_COLUMNS = {
+        "price",
+        "image",
+        "colour",
+        "status",
+        "attempts",
+        "last_attempt_at",
+        "completed_at",
+    }
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        import sqlalchemy as sa
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_outbox_mig_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        with db.engine.begin() as conn:
+            conn.execute(sa.text("DROP TABLE notification_outbox"))
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE notification_outbox ("
+                    "id INTEGER NOT NULL PRIMARY KEY, website VARCHAR NOT NULL, "
+                    "url VARCHAR NOT NULL, title VARCHAR NOT NULL, "
+                    "stock_status VARCHAR NOT NULL, created_at DATETIME NOT NULL)"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO notification_outbox VALUES "
+                    "(1, 'w', 'u', 't', 'In stock', '2026-01-01 00:00:00')"
+                )
+            )
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    def _columns(self, database):
+        import sqlalchemy as sa
+
+        with database.engine.connect() as conn:
+            return {
+                row[1]
+                for row in conn.execute(
+                    sa.text("PRAGMA table_info(notification_outbox)")
+                )
+            }
+
+    def test_old_schema_gets_new_columns_and_is_idempotent(self, database):
+        assert not (self.NEW_COLUMNS & self._columns(database))
+
+        database._run_migrations()
+        assert self.NEW_COLUMNS <= self._columns(database)
+
+        database._run_migrations()
+        assert self.NEW_COLUMNS <= self._columns(database)
+
+        with database.Session() as session:
+            row = session.query(NotificationOutbox).one()
+            assert row.status == "pending"
+            assert row.attempts == 0
+            assert row.price == ""
+
+    def test_migrated_table_is_usable(self, database):
+        database._run_migrations()
+        database.check_then_add_or_update_amiibo([_datum()])
+        assert len(database.get_pending_outbox("t.com")) == 1
+        assert len(database.get_pending_outbox("w")) == 1

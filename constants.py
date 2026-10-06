@@ -40,6 +40,12 @@ LOG_BACKUP_COUNT = 5
 MESSAGE_SEND_DELAY = 0.5
 """Delay between sending messages (in seconds) to avoid rate limiting."""
 
+OUTBOX_MAX_AGE_HOURS = 24
+"""Pending notifications older than this are expired instead of being retried."""
+
+OUTBOX_MAX_ATTEMPTS = 5
+"""Pending notifications that have been attempted this many times are expired."""
+
 # ============================================================================
 # STOCK STATUS COLORS (Discord embed colors)
 # ============================================================================

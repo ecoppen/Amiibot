@@ -3,6 +3,27 @@ from unittest.mock import Mock, patch
 from scraper import Scraper
 from result import DeliveryResult, DeliveryStatus, RunResult, RunStatus
 from scraper import CycleStats
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+
+def _outbox_row(item, row_id=1, **overrides):
+    row = SimpleNamespace(
+        id=row_id,
+        website=item["Website"],
+        url=item["URL"],
+        title=item["Title"],
+        stock_status=item["Stock"],
+        price=item["Price"],
+        image=item["Image"],
+        colour=item["Colour"],
+        status="pending",
+        attempts=0,
+        created_at=datetime.now(),
+    )
+    for k, v in overrides.items():
+        setattr(row, k, v)
+    return row
 
 
 class TestScraper:
@@ -23,11 +44,9 @@ class TestScraper:
         db.get_consecutive_unhealthy_obs.return_value = 1
         db._validate_amiibo_data.return_value = True
         db.check_then_add_or_update_amiibo.return_value = []
-        db.should_suppress_notification.return_value = False
-        db.build_idempotency_key.return_value = "abc123"
-        db.was_delivered_to.return_value = False
+        db.get_pending_outbox.return_value = []
+        db.get_delivery_status.return_value = None
         db.record_delivery.return_value = None
-        db.record_notification.return_value = None
         return db
 
     @pytest.fixture
@@ -254,10 +273,19 @@ class TestScraper:
         ]
         mock_stockist.get_amiibo.return_value = items
         mock_database.check_then_add_or_update_amiibo.return_value = items
+        mock_database.get_pending_outbox.return_value = [_outbox_row(items[0])]
 
         result = scraper.scrape_cycle()
 
         mock_messenger.send_embed_message.assert_called_once()
+        sent = mock_messenger.send_embed_message.call_args[0][0]
+        assert sent["Title"] == "Test Amiibo"
+        assert sent["Stock"] == "In stock"
+        mock_database.record_delivery.assert_called_once()
+        assert (
+            mock_database.record_delivery.call_args[1]["idempotency_key"] == "outbox:1"
+        )
+        mock_database.complete_outbox.assert_called_once_with(1, "done")
         assert result.notifications_sent == 1
 
     def test_scrape_cycle_multiple_stockists(self, mock_config, mock_database):
@@ -297,6 +325,7 @@ class TestScraper:
         mock_stockist.get_amiibo.return_value = items
         mock_stockist.messengers = ["different_messenger"]
         mock_database.check_then_add_or_update_amiibo.return_value = items
+        mock_database.get_pending_outbox.return_value = [_outbox_row(items[0])]
 
         result = scraper.scrape_cycle()
 
@@ -333,29 +362,6 @@ class TestScraper:
         assert len(call_args[0][0]) == 1
         assert call_args[0][0][0]["Title"] == "Valid Amiibo"
         assert result.succeeded == 1
-
-    def test_scrape_cycle_with_suppressed_notifications(
-        self, scraper, mock_stockist, mock_database, mock_messenger
-    ):
-        items = [
-            {
-                "Title": "Test Amiibo",
-                "Price": "$19.99",
-                "Stock": "In stock",
-                "URL": "https://test.com/1",
-                "Website": "test.com",
-                "Image": "https://test.com/img.jpg",
-                "Colour": 0x00FF00,
-            }
-        ]
-        mock_stockist.get_amiibo.return_value = items
-        mock_database.check_then_add_or_update_amiibo.return_value = items
-        mock_database.should_suppress_notification.return_value = True
-
-        result = scraper.scrape_cycle()
-
-        mock_messenger.send_embed_message.assert_not_called()
-        assert result.notifications_sent == 0
 
     def test_low_ratio_skips_delisting_below_threshold(
         self, scraper, mock_stockist, mock_database
@@ -447,3 +453,409 @@ class TestScraper:
         scraper.scrape_cycle()
 
         mock_database.record_healthy_scrape.assert_called_once_with("test.com", 1)
+
+
+def _scrape_item(stock="In stock", price="$19.99", url="https://t.com/1", colour=None):
+    if colour is None:
+        colour = 0x00FF00 if stock == "In stock" else 0xFF0000
+    return {
+        "Title": "Test Amiibo",
+        "Price": price,
+        "Stock": stock,
+        "URL": url,
+        "Website": "t.com",
+        "Image": "https://t.com/img.jpg",
+        "Colour": colour,
+    }
+
+
+def _result(status, http_status=None, name="m1"):
+    return DeliveryResult(status=status, messenger_name=name, http_status=http_status)
+
+
+OK = DeliveryStatus.SUCCESS
+TRANSIENT = DeliveryStatus.TRANSIENT_FAILURE
+PERMANENT = DeliveryStatus.PERMANENT_FAILURE
+
+
+class TestScraperOutboxDelivery:
+    """End-to-end scrape_cycle tests against a real SQLite database."""
+
+    @pytest.fixture(autouse=True)
+    def no_sleep(self):
+        with patch("time.sleep") as mock_sleep:
+            self.sleep = mock_sleep
+            yield mock_sleep
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        from config.config import DatabaseConfig
+        from database import Database
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_scraper_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _messenger(name="m1", results=None):
+        m = Mock()
+        m.name = name
+        m.send_embed_message.side_effect = None
+        m.send_embed_message.return_value = _result(OK, 200, name)
+        if results is not None:
+            m.send_embed_message.side_effect = results
+        return m
+
+    @staticmethod
+    def _build(database, messengers, items_holder):
+        stockist = Mock()
+        stockist.name = "t.com"
+        stockist.messengers = [m.name for m in messengers]
+        stockist.get_amiibo.side_effect = lambda: list(items_holder["items"])
+        stockists = Mock()
+        stockists.all_stockists = [stockist]
+        stockists.messengers = Mock()
+        stockists.messengers.all_messengers = messengers
+        return Scraper(config=Mock(), stockists=stockists, database=database), stockist
+
+    @staticmethod
+    def _expire_cooldown(database):
+        from database import AmiiboStock
+
+        with database.Session() as session:
+            for item in session.query(AmiiboStock).all():
+                if item.last_notified_at:
+                    item.last_notified_at = datetime.now() - timedelta(hours=2)
+            session.commit()
+
+    @staticmethod
+    def _rows(database):
+        from database import NotificationOutbox
+
+        with database.Session() as session:
+            return (
+                session.query(NotificationOutbox).order_by(NotificationOutbox.id).all()
+            )
+
+    @staticmethod
+    def _sent_statuses(messenger):
+        return [c[0][0]["Stock"] for c in messenger.send_embed_message.call_args_list]
+
+    def test_new_item_is_delivered_and_row_done(self, database):
+        m = self._messenger()
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m], holder)
+
+        result = scraper.scrape_cycle()
+
+        assert result.succeeded == 1
+        assert result.notifications_sent == 1
+        assert self._sent_statuses(m) == ["In stock"]
+        rows = self._rows(database)
+        assert [(r.status, r.attempts) for r in rows] == [("done", 1)]
+        assert rows[0].completed_at is not None
+
+    def test_restock_is_delivered(self, database):
+        m = self._messenger()
+        holder = {"items": [_scrape_item("Out of Stock")]}
+        scraper, _ = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+
+        holder["items"] = [_scrape_item("In stock")]
+        result = scraper.scrape_cycle()
+
+        assert result.notifications_sent == 1
+        assert self._sent_statuses(m) == ["Out of Stock", "In stock"]
+        sent = m.send_embed_message.call_args[0][0]
+        assert sent["Colour"] == 0x00FF00
+        assert sent["Price"] == "$19.99"
+        assert sent["Website"] == "t.com"
+
+    def test_restock_sellout_restock_delivers_each_transition(self, database):
+        m = self._messenger()
+        holder = {"items": [_scrape_item("Out of Stock")]}
+        scraper, _ = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+        for stock in ["In stock", "Out of Stock", "In stock"]:
+            self._expire_cooldown(database)
+            holder["items"] = [_scrape_item(stock)]
+            scraper.scrape_cycle()
+
+        assert self._sent_statuses(m) == [
+            "Out of Stock",
+            "In stock",
+            "Out of Stock",
+            "In stock",
+        ]
+        assert self._sent_statuses(m).count("In stock") == 2
+
+    def test_two_price_changes_are_both_delivered(self, database):
+        m = self._messenger()
+        holder = {"items": [_scrape_item(price="$19.99")]}
+        scraper, _ = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+        for price in ["$24.99", "$29.99"]:
+            self._expire_cooldown(database)
+            holder["items"] = [_scrape_item(price=price)]
+            scraper.scrape_cycle()
+
+        sent = [c[0][0] for c in m.send_embed_message.call_args_list]
+        assert [s["Stock"] for s in sent] == [
+            "In stock",
+            "Price change",
+            "Price change",
+        ]
+        assert [s["Price"] for s in sent[1:]] == ["$24.99", "$29.99"]
+        from database import NotificationDelivery
+
+        with database.Session() as session:
+            keys = {d.idempotency_key for d in session.query(NotificationDelivery)}
+        assert len(keys) == 3
+
+    def test_delisting_is_delivered_once(self, database):
+        m = self._messenger()
+        keep = _scrape_item(url="https://t.com/1")
+        gone = _scrape_item(url="https://t.com/2")
+        holder = {"items": [keep, gone]}
+        scraper, _ = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+        holder["items"] = [keep]
+        for _ in range(6):
+            scraper.scrape_cycle()
+
+        assert self._sent_statuses(m).count("Delisted") == 1
+
+    def test_transient_failure_stays_pending_and_is_retried_with_empty_scrape(
+        self, database
+    ):
+        m = self._messenger(
+            results=[
+                _result(TRANSIENT, 429),
+                _result(OK, 200),
+            ]
+        )
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m], holder)
+
+        result = scraper.scrape_cycle()
+        assert result.notifications_sent == 0
+        row = self._rows(database)[0]
+        assert (row.status, row.attempts) == ("pending", 1)
+
+        # Next run the scrape returns nothing (counted as a failure) but the
+        # pending notification must still be retried.
+        holder["items"] = []
+        result = scraper.scrape_cycle()
+        assert result.failed == 1
+        assert result.notifications_sent == 1
+        assert m.send_embed_message.call_count == 2
+        row = self._rows(database)[0]
+        assert row.status == "done"
+        assert row.attempts == 2
+
+    def test_pending_is_retried_when_scrape_raises(self, database):
+        m = self._messenger(results=[_result(TRANSIENT, 503), _result(OK, 200)])
+        holder = {"items": [_scrape_item()]}
+        scraper, stockist = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+
+        stockist.get_amiibo.side_effect = Exception("boom")
+        result = scraper.scrape_cycle()
+
+        assert result.failed == 1
+        assert result.notifications_sent == 1
+        assert self._rows(database)[0].status == "done"
+
+    def test_retry_does_not_resend_to_messenger_that_succeeded(self, database):
+        m1 = self._messenger("m1")
+        m2 = self._messenger(
+            "m2", results=[_result(TRANSIENT, 500, "m2"), _result(OK, 200, "m2")]
+        )
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m1, m2], holder)
+
+        first = scraper.scrape_cycle()
+        assert first.notifications_sent == 1
+        assert self._rows(database)[0].status == "pending"
+
+        second = scraper.scrape_cycle()
+        assert second.notifications_sent == 1
+        assert m1.send_embed_message.call_count == 1
+        assert m2.send_embed_message.call_count == 2
+        assert self._rows(database)[0].status == "done"
+
+    def test_permanent_failure_is_final_and_not_retried(self, database):
+        m1 = self._messenger("m1", results=[_result(PERMANENT, 404, "m1")])
+        m2 = self._messenger(
+            "m2", results=[_result(TRANSIENT, 500, "m2"), _result(OK, 200, "m2")]
+        )
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m1, m2], holder)
+
+        scraper.scrape_cycle()
+        assert self._rows(database)[0].status == "pending"
+        scraper.scrape_cycle()
+
+        assert m1.send_embed_message.call_count == 1
+        assert m2.send_embed_message.call_count == 2
+        assert self._rows(database)[0].status == "done"
+
+    def test_rate_limit_stops_sends_without_using_attempts(self, database):
+        m = self._messenger(results=[_result(TRANSIENT, 429), _result(OK, 200)])
+        holder = {
+            "items": [_scrape_item(url=f"https://t.com/{i}") for i in range(1, 4)]
+        }
+        scraper, _ = self._build(database, [m], holder)
+
+        result = scraper.scrape_cycle()
+
+        assert result.notifications_sent == 0
+        assert m.send_embed_message.call_count == 1
+        rows = self._rows(database)
+        assert [r.status for r in rows] == ["pending"] * 3
+        assert [r.attempts for r in rows] == [1, 0, 0]
+
+    def test_rate_limit_only_affects_the_limited_messenger(self, database):
+        m1 = self._messenger("m1", results=[_result(TRANSIENT, 429, "m1")])
+        m2 = self._messenger("m2")
+        holder = {
+            "items": [_scrape_item(url=f"https://t.com/{i}") for i in range(1, 3)]
+        }
+        scraper, _ = self._build(database, [m1, m2], holder)
+
+        result = scraper.scrape_cycle()
+
+        assert m1.send_embed_message.call_count == 1
+        assert m2.send_embed_message.call_count == 2
+        assert result.notifications_sent == 2
+
+    def test_old_row_is_expired_not_sent(self, database):
+        from database import NotificationOutbox
+
+        m = self._messenger()
+        holder = {"items": [_scrape_item()]}
+        scraper, stockist = self._build(database, [m], holder)
+        stockist.get_amiibo.side_effect = Exception("down")
+        with database.Session() as session:
+            session.add(
+                NotificationOutbox(
+                    website="t.com",
+                    url="https://t.com/1",
+                    title="Old",
+                    stock_status="In stock",
+                    price="$1",
+                    image="i",
+                    colour=1,
+                    created_at=datetime.now() - timedelta(hours=25),
+                )
+            )
+            session.commit()
+
+        result = scraper.scrape_cycle()
+
+        assert result.notifications_sent == 0
+        m.send_embed_message.assert_not_called()
+        row = self._rows(database)[0]
+        assert row.status == "expired"
+        assert row.completed_at is not None
+
+    def test_row_at_max_attempts_is_expired_not_sent(self, database):
+        from constants import OUTBOX_MAX_ATTEMPTS
+        from database import NotificationOutbox
+
+        m = self._messenger()
+        holder = {"items": []}
+        scraper, _ = self._build(database, [m], holder)
+        with database.Session() as session:
+            session.add(
+                NotificationOutbox(
+                    website="t.com",
+                    url="https://t.com/1",
+                    title="Stuck",
+                    stock_status="In stock",
+                    price="$1",
+                    image="i",
+                    colour=1,
+                    attempts=OUTBOX_MAX_ATTEMPTS,
+                )
+            )
+            session.commit()
+
+        scraper.scrape_cycle()
+
+        m.send_embed_message.assert_not_called()
+        assert self._rows(database)[0].status == "expired"
+
+    def test_row_expires_after_repeated_transient_failures(self, database):
+        from constants import OUTBOX_MAX_ATTEMPTS
+
+        m = self._messenger(results=lambda item: _result(TRANSIENT, 500))
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m], holder)
+
+        for _ in range(OUTBOX_MAX_ATTEMPTS + 1):
+            scraper.scrape_cycle()
+
+        assert m.send_embed_message.call_count == OUTBOX_MAX_ATTEMPTS
+        assert self._rows(database)[0].status == "expired"
+
+    def test_sleeps_between_sends(self, database):
+        from constants import MESSAGE_SEND_DELAY
+
+        m = self._messenger()
+        holder = {
+            "items": [_scrape_item(url=f"https://t.com/{i}") for i in range(1, 4)]
+        }
+        scraper, _ = self._build(database, [m], holder)
+
+        scraper.scrape_cycle()
+
+        assert m.send_embed_message.call_count == 3
+        assert [c[0][0] for c in self.sleep.call_args_list] == [MESSAGE_SEND_DELAY] * 2
+
+    def test_only_assigned_messengers_receive(self, database):
+        m1 = self._messenger("m1")
+        m2 = self._messenger("m2")
+        holder = {"items": [_scrape_item()]}
+        scraper, stockist = self._build(database, [m1, m2], holder)
+        stockist.messengers = ["m2"]
+
+        scraper.scrape_cycle()
+
+        m1.send_embed_message.assert_not_called()
+        assert m2.send_embed_message.call_count == 1
+
+    def test_flush_failure_does_not_break_cycle(self, database):
+        m = self._messenger()
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m], holder)
+        with patch.object(
+            database, "get_pending_outbox", side_effect=RuntimeError("db down")
+        ):
+            result = scraper.scrape_cycle()
+        assert result.succeeded == 1
+        assert result.notifications_sent == 0
+
+    def test_outbox_rows_are_per_website(self, database):
+        m = self._messenger()
+        other = _scrape_item()
+        other["Website"] = "other.com"
+        database.check_then_add_or_update_amiibo([other])
+        holder = {"items": [_scrape_item()]}
+        scraper, _ = self._build(database, [m], holder)
+
+        scraper.scrape_cycle()
+
+        assert m.send_embed_message.call_count == 1
+        assert [r.status for r in self._rows(database) if r.website == "other.com"] == [
+            "pending"
+        ]

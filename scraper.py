@@ -1,18 +1,29 @@
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 from constants import (
     CONSECUTIVE_UNHEALTHY_THRESHOLD,
     MAX_RETRY_ATTEMPTS,
+    MESSAGE_SEND_DELAY,
+    OUTBOX_MAX_AGE_HOURS,
+    OUTBOX_MAX_ATTEMPTS,
     RETRY_BACKOFF_FACTOR,
     STOCKIST_HEALTH_RATIO,
 )
+from database import OUTBOX_DONE, OUTBOX_EXPIRED
 from models import deduplicate_by_url, validate_products
 from result import DeliveryStatus, FailureCategory, RunResult, RunStatus
 
 log = logging.getLogger(__name__)
+
+_FINAL_DELIVERY_STATUSES = {
+    DeliveryStatus.SUCCESS.value,
+    DeliveryStatus.PERMANENT_FAILURE.value,
+    DeliveryStatus.INACTIVE.value,
+}
 
 
 @dataclass
@@ -102,164 +113,19 @@ class Scraper:
         stockist_results: list[StockistResult] = []
 
         for stockist in self.stockists.all_stockists:
-            log.info(f"Scraping {stockist.name}", extra={"stockist": stockist.name})
-            start_time = time.monotonic()
-
             try:
-                scraped = self._scrape_stockist(stockist)
-            except Exception as e:
-                log.error(f"Error scraping {stockist.name}: {e}", exc_info=True)
-                elapsed = time.monotonic() - start_time
+                result = self._process_stockist(stockist)
+            finally:
+                # Always flush, even if the scrape failed or returned nothing, so
+                # events queued by earlier runs still get retried.
+                notifications_sent += self._safe_flush_outbox(stockist)
 
-                failure_count = self.database.record_scraping_failure(stockist.name)
-                self.database.record_scrape_attempt(stockist=stockist.name)
-
-                stockist_results.append(
-                    StockistResult(
-                        name=stockist.name,
-                        success=False,
-                        duration_seconds=round(elapsed, 2),
-                        consecutive_failures=failure_count,
-                        error=str(e),
-                    )
-                )
-                failed += 1
-                continue
-
-            log.info(
-                f"Scraped {len(scraped)} items from {stockist.name}",
-                extra={"stockist": stockist.name, "item_count": len(scraped)},
-            )
-
-            self.database.record_scrape_attempt(stockist=stockist.name)
-
-            if len(scraped) == 0:
-                failure_count = self.database.record_scraping_failure(stockist.name)
-
-                log.warning(
-                    f"No items returned from {stockist.name}. This may be a scraping failure "
-                    f"or the store genuinely has no amiibo. Consecutive failures: {failure_count}. "
-                    f"Skipping database update to prevent false 'delisted' notifications."
-                )
-
-                failed += 1
-                continue
-
-            validated_items, validation_errors = validate_products(scraped)
-            for error in validation_errors:
-                log.error(f"Invalid data from {stockist.name}: {error}")
-
-            validated_items = deduplicate_by_url(validated_items)
-
-            if not validated_items:
-                log.warning(f"No valid items from {stockist.name} after validation")
-                log.warning("Skipping database update to prevent false notifications")
-                self.database.record_scraping_failure(stockist.name)
-                failed += 1
-                continue
-
-            self.database.record_scraping_success(stockist.name)
-
-            current_count = len(validated_items)
-            healthy_count = self.database.get_last_healthy_count(stockist.name)
-            skip_delisting = False
-
-            if healthy_count > 0:
-                ratio = current_count / healthy_count
-                if ratio < STOCKIST_HEALTH_RATIO:
-                    unhealthy_obs = self.database.record_unhealthy_scrape(stockist.name)
-
-                    if unhealthy_obs < CONSECUTIVE_UNHEALTHY_THRESHOLD:
-                        log.warning(
-                            f"Stockist {stockist.name} may be unhealthy: "
-                            f"{current_count} items vs {healthy_count} baseline "
-                            f"(ratio {ratio:.2f} < {STOCKIST_HEALTH_RATIO}). "
-                            f"Skipping delisting. "
-                            f"({unhealthy_obs}/{CONSECUTIVE_UNHEALTHY_THRESHOLD} unhealthy observations)"
-                        )
-                        skip_delisting = True
-                    else:
-                        log.warning(
-                            f"Stockist {stockist.name}: accepting new baseline of "
-                            f"{current_count} items (previous: {healthy_count}) after "
-                            f"{unhealthy_obs} low observations"
-                        )
-                        self.database.record_healthy_scrape(
-                            stockist.name, current_count
-                        )
-                else:
-                    self.database.record_healthy_scrape(stockist.name, current_count)
-            else:
-                self.database.record_healthy_scrape(stockist.name, current_count)
-
-            to_notify = self.database.check_then_add_or_update_amiibo(
-                validated_items, skip_delisting=skip_delisting
-            )
-
-            if len(to_notify) == 0:
-                log.info(f"No changes detected for {stockist.name}")
-                elapsed = time.monotonic() - start_time
-                stockist_results.append(
-                    StockistResult(
-                        name=stockist.name,
-                        success=True,
-                        item_count=current_count,
-                        duration_seconds=round(elapsed, 2),
-                    )
-                )
+            if result is not None:
+                stockist_results.append(result)
+            if result is not None and result.success:
                 succeeded += 1
-                continue
-
-            suppressed = 0
-            for item in to_notify:
-                if self.database.should_suppress_notification(
-                    item["URL"], item["Website"], item["Stock"]
-                ):
-                    log.info(f"Skipping notification for {item['Title']} (cooldown)")
-                    suppressed += 1
-                    continue
-
-                idempotency_key = self.database.build_idempotency_key(
-                    item["URL"], item["Website"], item["Stock"]
-                )
-
-                for messenger in self.messengers.all_messengers:
-                    if messenger.name not in stockist.messengers:
-                        continue
-                    if self.database.was_delivered_to(idempotency_key, messenger.name):
-                        continue
-
-                    result = messenger.send_embed_message(item)
-                    self.database.record_delivery(
-                        idempotency_key=idempotency_key,
-                        website=item["Website"],
-                        url=item["URL"],
-                        title=item["Title"],
-                        stock_status=item["Stock"],
-                        messenger_name=messenger.name,
-                        delivery_status=result.status.value,
-                    )
-                    if result.status == DeliveryStatus.SUCCESS:
-                        notifications_sent += 1
-
-                self.database.record_notification(
-                    item["URL"], item["Website"], item["Stock"]
-                )
-            if suppressed:
-                log.info(
-                    f"Suppressed {suppressed} notification(s) for {stockist.name} "
-                    f"(cooldown)"
-                )
-            elapsed = time.monotonic() - start_time
-            stockist_results.append(
-                StockistResult(
-                    name=stockist.name,
-                    success=True,
-                    item_count=current_count,
-                    duration_seconds=round(elapsed, 2),
-                )
-            )
-            succeeded += 1
+            else:
+                failed += 1
 
         return CycleStats(
             succeeded=succeeded,
@@ -267,3 +133,200 @@ class Scraper:
             notifications_sent=notifications_sent,
             stockist_results=stockist_results,
         )
+
+    def _process_stockist(self, stockist: Any) -> StockistResult | None:
+        """Scrape one stockist and record changes (queuing notifications).
+
+        Returns a StockistResult for completed or errored scrapes, or None when
+        the scrape produced no usable items (counted as a failure by the caller).
+        """
+        log.info(f"Scraping {stockist.name}", extra={"stockist": stockist.name})
+        start_time = time.monotonic()
+
+        try:
+            scraped = self._scrape_stockist(stockist)
+        except Exception as e:
+            log.error(f"Error scraping {stockist.name}: {e}", exc_info=True)
+            elapsed = time.monotonic() - start_time
+
+            failure_count = self.database.record_scraping_failure(stockist.name)
+            self.database.record_scrape_attempt(stockist=stockist.name)
+
+            return StockistResult(
+                name=stockist.name,
+                success=False,
+                duration_seconds=round(elapsed, 2),
+                consecutive_failures=failure_count,
+                error=str(e),
+            )
+
+        log.info(
+            f"Scraped {len(scraped)} items from {stockist.name}",
+            extra={"stockist": stockist.name, "item_count": len(scraped)},
+        )
+
+        self.database.record_scrape_attempt(stockist=stockist.name)
+
+        if len(scraped) == 0:
+            failure_count = self.database.record_scraping_failure(stockist.name)
+
+            log.warning(
+                f"No items returned from {stockist.name}. This may be a scraping failure "
+                f"or the store genuinely has no amiibo. Consecutive failures: {failure_count}. "
+                f"Skipping database update to prevent false 'delisted' notifications."
+            )
+            return None
+
+        validated_items, validation_errors = validate_products(scraped)
+        for error in validation_errors:
+            log.error(f"Invalid data from {stockist.name}: {error}")
+
+        validated_items = deduplicate_by_url(validated_items)
+
+        if not validated_items:
+            log.warning(f"No valid items from {stockist.name} after validation")
+            log.warning("Skipping database update to prevent false notifications")
+            self.database.record_scraping_failure(stockist.name)
+            return None
+
+        self.database.record_scraping_success(stockist.name)
+
+        current_count = len(validated_items)
+        healthy_count = self.database.get_last_healthy_count(stockist.name)
+        skip_delisting = False
+
+        if healthy_count > 0:
+            ratio = current_count / healthy_count
+            if ratio < STOCKIST_HEALTH_RATIO:
+                unhealthy_obs = self.database.record_unhealthy_scrape(stockist.name)
+
+                if unhealthy_obs < CONSECUTIVE_UNHEALTHY_THRESHOLD:
+                    log.warning(
+                        f"Stockist {stockist.name} may be unhealthy: "
+                        f"{current_count} items vs {healthy_count} baseline "
+                        f"(ratio {ratio:.2f} < {STOCKIST_HEALTH_RATIO}). "
+                        f"Skipping delisting. "
+                        f"({unhealthy_obs}/{CONSECUTIVE_UNHEALTHY_THRESHOLD} unhealthy observations)"
+                    )
+                    skip_delisting = True
+                else:
+                    log.warning(
+                        f"Stockist {stockist.name}: accepting new baseline of "
+                        f"{current_count} items (previous: {healthy_count}) after "
+                        f"{unhealthy_obs} low observations"
+                    )
+                    self.database.record_healthy_scrape(stockist.name, current_count)
+            else:
+                self.database.record_healthy_scrape(stockist.name, current_count)
+        else:
+            self.database.record_healthy_scrape(stockist.name, current_count)
+
+        # Events are enqueued in the outbox in the same transaction as the state
+        # change; they are delivered by _flush_outbox.
+        queued = self.database.check_then_add_or_update_amiibo(
+            validated_items, skip_delisting=skip_delisting
+        )
+        if len(queued) == 0:
+            log.info(f"No changes detected for {stockist.name}")
+        else:
+            log.info(f"Queued {len(queued)} notification(s) for {stockist.name}")
+
+        elapsed = time.monotonic() - start_time
+        return StockistResult(
+            name=stockist.name,
+            success=True,
+            item_count=current_count,
+            duration_seconds=round(elapsed, 2),
+        )
+
+    def _safe_flush_outbox(self, stockist: Any) -> int:
+        try:
+            return self._flush_outbox(stockist)
+        except Exception as e:
+            log.error(
+                f"Error flushing notifications for {stockist.name}: {e}",
+                exc_info=True,
+            )
+            return 0
+
+    def _flush_outbox(self, stockist: Any) -> int:
+        """Deliver pending outbox rows for a stockist. Returns successful sends."""
+        pending = self.database.get_pending_outbox(stockist.name)
+        if not pending:
+            return 0
+
+        targets = [
+            m for m in self.messengers.all_messengers if m.name in stockist.messengers
+        ]
+        max_age = timedelta(hours=OUTBOX_MAX_AGE_HOURS)
+        rate_limited: set[str] = set()
+        notifications_sent = 0
+        sends_made = 0
+
+        for row in pending:
+            if (
+                datetime.now() - row.created_at > max_age
+                or row.attempts >= OUTBOX_MAX_ATTEMPTS
+            ):
+                log.warning(
+                    f"Expiring undelivered notification for {row.title} "
+                    f"({row.stock_status}) after {row.attempts} attempt(s)"
+                )
+                self.database.complete_outbox(row.id, OUTBOX_EXPIRED)
+                continue
+
+            key = f"outbox:{row.id}"
+            item = {
+                "Colour": row.colour,
+                "Title": row.title,
+                "Image": row.image,
+                "URL": row.url,
+                "Price": row.price,
+                "Stock": row.stock_status,
+                "Website": row.website,
+            }
+            all_final = True
+            attempted = False
+
+            for messenger in targets:
+                recorded = self.database.get_delivery_status(key, messenger.name)
+                if recorded in _FINAL_DELIVERY_STATUSES:
+                    continue
+                if messenger.name in rate_limited:
+                    all_final = False
+                    continue
+
+                if sends_made:
+                    time.sleep(MESSAGE_SEND_DELAY)
+                sends_made += 1
+                attempted = True
+
+                result = messenger.send_embed_message(item)
+                self.database.record_delivery(
+                    idempotency_key=key,
+                    website=row.website,
+                    url=row.url,
+                    title=row.title,
+                    stock_status=row.stock_status,
+                    messenger_name=messenger.name,
+                    delivery_status=result.status.value,
+                )
+                if result.status == DeliveryStatus.SUCCESS:
+                    notifications_sent += 1
+                elif result.status == DeliveryStatus.TRANSIENT_FAILURE:
+                    all_final = False
+                    if result.http_status == 429:
+                        log.warning(
+                            f"{messenger.name} is rate limited; "
+                            f"deferring remaining notifications"
+                        )
+                        rate_limited.add(messenger.name)
+
+            # Rows deferred only because of rate limiting were not actually
+            # tried, so they do not use up an attempt.
+            if attempted:
+                self.database.mark_outbox_attempt(row.id)
+            if all_final:
+                self.database.complete_outbox(row.id, OUTBOX_DONE)
+
+        return notifications_sent

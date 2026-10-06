@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import re
 from datetime import datetime, timedelta
@@ -19,6 +18,22 @@ from result import DeliveryStatus
 from stockist.stockist import Stock
 
 log = logging.getLogger(__name__)
+
+OUTBOX_PENDING = "pending"
+OUTBOX_DONE = "done"
+OUTBOX_EXPIRED = "expired"
+
+# Columns added to notification_outbox after its original creation. Each entry
+# is (column name, DDL type and default), valid for both sqlite and postgres.
+_OUTBOX_MIGRATION_COLUMNS: list[tuple[str, str]] = [
+    ("price", "VARCHAR DEFAULT ''"),
+    ("image", "VARCHAR DEFAULT ''"),
+    ("colour", "INTEGER DEFAULT 0"),
+    ("status", "VARCHAR DEFAULT 'pending'"),
+    ("attempts", "INTEGER DEFAULT 0"),
+    ("last_attempt_at", "TIMESTAMP"),
+    ("completed_at", "TIMESTAMP"),
+]
 
 
 class Base(DeclarativeBase):
@@ -55,6 +70,13 @@ class NotificationOutbox(Base):
     title: Mapped[str]
     stock_status: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    price: Mapped[str] = mapped_column(default="")
+    image: Mapped[str] = mapped_column(default="")
+    colour: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(default=OUTBOX_PENDING)
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class NotificationDelivery(Base):
@@ -208,6 +230,8 @@ class Database:
                             "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
                         )
                     )
+                result = conn.execute(db.text("PRAGMA table_info(notification_outbox)"))
+                self._add_missing_outbox_columns(conn, [row[1] for row in result])
                 conn.commit()
         elif self._engine_type == "postgres":
             with self.engine.connect() as conn:
@@ -297,7 +321,24 @@ class Database:
                             "ALTER TABLE last_scraped ADD COLUMN consecutive_unhealthy_obs INTEGER DEFAULT 0"
                         )
                     )
+                result = conn.execute(
+                    db.text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'notification_outbox'"
+                    )
+                )
+                self._add_missing_outbox_columns(conn, [row[0] for row in result])
                 conn.commit()
+
+    @staticmethod
+    def _add_missing_outbox_columns(conn: Any, existing_cols: list[str]) -> None:
+        """Add columns introduced after notification_outbox was first created."""
+        if not existing_cols:
+            return
+        for name, ddl in _OUTBOX_MIGRATION_COLUMNS:
+            if name not in existing_cols:
+                conn.execute(
+                    db.text(f"ALTER TABLE notification_outbox ADD COLUMN {name} {ddl}")
+                )
 
     def remove_currency(self, currency_string: str) -> float:
         """Extract numeric price from currency string.
@@ -546,6 +587,9 @@ class Database:
                 .first()
             )
             if existing is not None:
+                existing.delivery_status = delivery_status
+                existing.delivered_at = datetime.now()
+                session.commit()
                 return
             delivery = NotificationDelivery(
                 idempotency_key=idempotency_key,
@@ -572,10 +616,50 @@ class Database:
             )
             return delivery is not None
 
-    @staticmethod
-    def build_idempotency_key(url: str, website: str, stock_status: str) -> str:
-        raw = f"{website}:{url}:{stock_status}"
-        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+    def get_delivery_status(
+        self, idempotency_key: str, messenger_name: str
+    ) -> str | None:
+        """Return the recorded delivery status for (key, messenger), if any."""
+        with self.Session() as session:
+            delivery = (
+                session.query(NotificationDelivery)
+                .filter_by(
+                    idempotency_key=idempotency_key,
+                    messenger_name=messenger_name,
+                )
+                .first()
+            )
+            return delivery.delivery_status if delivery is not None else None
+
+    def get_pending_outbox(self, website: str) -> list[NotificationOutbox]:
+        """Return pending outbox rows for a website, oldest first."""
+        with self.Session() as session:
+            return (
+                session.query(NotificationOutbox)
+                .filter_by(website=website, status=OUTBOX_PENDING)
+                .order_by(NotificationOutbox.created_at, NotificationOutbox.id)
+                .all()
+            )
+
+    def mark_outbox_attempt(self, outbox_id: int) -> None:
+        """Record a delivery attempt against an outbox row."""
+        with self.Session() as session:
+            row = session.get(NotificationOutbox, outbox_id)
+            if row is not None:
+                row.attempts += 1
+                row.last_attempt_at = datetime.now()
+                session.commit()
+
+    def complete_outbox(self, outbox_id: int, status: str = OUTBOX_DONE) -> None:
+        """Mark an outbox row as done or expired."""
+        if status not in (OUTBOX_DONE, OUTBOX_EXPIRED):
+            raise ValueError(f"invalid outbox completion status: {status}")
+        with self.Session() as session:
+            row = session.get(NotificationOutbox, outbox_id)
+            if row is not None:
+                row.status = status
+                row.completed_at = datetime.now()
+                session.commit()
 
     def _get_existing_items(self, website: str) -> list[AmiiboStock]:
         """Retrieve all existing items for a website."""
@@ -611,12 +695,76 @@ class Database:
             "Website": item.Website,
         }
 
+    def _handle_stock_change(
+        self, session: Any, item: AmiiboStock, new_datum: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Apply a stock-status transition (or relisting) and build its event."""
+        log.info(
+            f"Stock changed for {item.Title}: {item.Stock} -> {new_datum['Stock']}"
+        )
+        item.Stock = new_datum["Stock"]
+        item.Colour = new_datum["Colour"]
+        if self.remove_currency(new_datum["Price"]) != self.remove_currency(item.Price):
+            item.Price = new_datum["Price"]
+        return {
+            "Colour": new_datum["Colour"],
+            "Title": item.Title,
+            "Image": item.Image,
+            "URL": item.URL,
+            "Price": new_datum["Price"],
+            "Stock": new_datum["Stock"],
+            "Website": item.Website,
+        }
+
+    def _enqueue_event(
+        self, session: Any, event: dict[str, Any], item: AmiiboStock
+    ) -> bool:
+        """Queue an event in the outbox unless the item's cooldown suppresses it.
+
+        In-stock events are never suppressed: missing a restock is the worst
+        outcome for users, so the cooldown only applies to the other statuses
+        (out of stock, price change, delisted). In-stock events still update
+        the item's last-notified bookkeeping.
+
+        Runs inside the caller's transaction so that the state change and the
+        pending notification are committed (or rolled back) together.
+        """
+        now = datetime.now()
+        status = event["Stock"]
+        if (
+            status != Stock.IN_STOCK.value
+            and item.last_notified_at is not None
+            and item.last_notified_status == status
+            and now
+            < item.last_notified_at + timedelta(minutes=NOTIFICATION_COOLDOWN_MINUTES)
+        ):
+            log.info(f"Skipping notification for {item.Title} ({status}, cooldown)")
+            return False
+        item.last_notified_at = now
+        item.last_notified_status = status
+        session.add(
+            NotificationOutbox(
+                website=event["Website"],
+                url=event["URL"],
+                title=event["Title"],
+                stock_status=status,
+                price=event["Price"],
+                image=event["Image"],
+                colour=event["Colour"],
+                status=OUTBOX_PENDING,
+                attempts=0,
+                created_at=now,
+            )
+        )
+        return True
+
     def _add_new_items(
         self, session: Any, new_items: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         added = []
         for datum in new_items:
             log.info(f"Adding {datum['Title']}")
+            now = datetime.now()
             amiibo = AmiiboStock(
                 Website=datum["Website"],
                 Title=datum["Title"],
@@ -625,17 +773,26 @@ class Database:
                 Colour=datum["Colour"],
                 URL=datum["URL"],
                 Image=datum["Image"],
-                timestamp=datetime.now(),
+                timestamp=now,
                 is_active=True,
-                first_seen_at=datetime.now(),
+                first_seen_at=now,
             )
             session.add(amiibo)
+            # New items are never suppressed by the cooldown.
+            self._enqueue_event(session, datum, amiibo)
             added.append(datum)
         return added
 
     def check_then_add_or_update_amiibo(
         self, data: list[dict[str, Any]], skip_delisting: bool = False
     ) -> list[dict[str, Any]]:
+        """Apply a scrape to the database and enqueue notifications.
+
+        Detected events (new item, stock change, price change, delisting) are
+        written to the notification outbox in the same transaction as the state
+        change. Returns the events that were enqueued (cooldown-suppressed
+        events are applied to state but not returned).
+        """
         if not data:
             return []
 
@@ -656,29 +813,32 @@ class Database:
                     session.commit()
                     return added
 
-                existing_map = {
-                    item.URL: (item.id, item.Price, item.Title, item.Image)
-                    for item in existing_items
-                }
+                existing_urls = {item.URL for item in existing_items}
                 new_data_map = {datum["URL"]: datum for datum in data}
 
                 for item in existing_items:
+                    event: dict[str, Any] | None = None
                     if item.URL in new_data_map:
                         new_datum = new_data_map[item.URL]
                         item.missed_count = 0
                         if not item.is_active:
-                            log.info(f"{item.Title} has returned to stock")
+                            log.info(f"{item.Title} has returned to the listing")
                             item.is_active = True
                             item.delisted_at = None
-                        if self.remove_currency(
+                            event = self._handle_stock_change(session, item, new_datum)
+                        elif new_datum["Stock"] != item.Stock:
+                            event = self._handle_stock_change(session, item, new_datum)
+                        elif self.remove_currency(
                             new_datum["Price"]
                         ) != self.remove_currency(item.Price):
-                            statistics["Updated"] += 1
-                            output.append(
-                                self._handle_price_change(
-                                    session, item, new_datum["Price"]
-                                )
+                            event = self._handle_price_change(
+                                session, item, new_datum["Price"]
                             )
+                        if event is not None:
+                            statistics["Updated"] += 1
+                    elif not item.is_active:
+                        # Already delisted: do not count misses or re-emit.
+                        continue
                     elif skip_delisting:
                         log.debug(
                             f"Skipping delisting check for {item.Title} (health check active)"
@@ -691,9 +851,12 @@ class Database:
                         )
                         if item.missed_count >= SCRAPING_FAILURE_GRACE_PERIOD:
                             statistics["Deleted"] += 1
-                            output.append(self._handle_delisted_item(session, item))
+                            event = self._handle_delisted_item(session, item)
 
-                new_items = [d for d in data if d["URL"] not in existing_map]
+                    if event is not None and self._enqueue_event(session, event, item):
+                        output.append(event)
+
+                new_items = [d for d in data if d["URL"] not in existing_urls]
                 if new_items:
                     added = self._add_new_items(session, new_items)
                     output.extend(added)
