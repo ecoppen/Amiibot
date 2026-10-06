@@ -39,7 +39,7 @@ URGENT_STATUSES: frozenset[str] = frozenset(
 
 class Stockist:
     def __init__(self, messengers: list[str]) -> None:
-        self.params: dict[str, Any] = {}
+        self.params: dict[str, Any] | None = {}
         self.messengers = messengers
 
     base_url: str | None = None

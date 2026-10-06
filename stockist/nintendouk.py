@@ -35,10 +35,10 @@ def _format_release_date(value: Any) -> str | None:
 
 
 class NintendoUK(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
-        self.params = {
+        self.params: dict[str, Any] = {
             "checkAvailability": "true",
             "limit": 24,
             "sort": "newest-products",
@@ -46,11 +46,11 @@ class NintendoUK(Stockist):
             "offset": 0,
         }
 
-    base_url = "https://store.nintendo.co.uk/api/catalog/products"
-    name = "Nintendo UK"
+    base_url: str = "https://store.nintendo.co.uk/api/catalog/products"
+    name: str = "Nintendo UK"
 
-    def get_amiibo(self):
-        all_found = []
+    def get_amiibo(self) -> list[dict[str, Any]]:
+        all_found: list[dict[str, Any]] = []
         complete = False
         self.params["offset"] = 0
 
@@ -61,6 +61,7 @@ class NintendoUK(Stockist):
                 log.error(f"{self.name}: request failed or returned nothing")
                 break
 
+            cards: Any
             try:
                 cards = json.loads(response.content.decode("utf-8"))
             except json.JSONDecodeError as exc:
@@ -72,59 +73,66 @@ class NintendoUK(Stockist):
                 log.error(f"Invalid attribute: {e}")
                 cards = []
 
-            if len(cards) > 0:
-                if "data" in [*cards]:
-                    log.debug(f"{cards['data']}")
-                    if cards["data"] is None:
-                        log.warning("No data returned from API")
-                        break
-                    if "products" in cards["data"]:
-                        log.debug(f"{cards['data']['products']}")
-                        if len(cards["data"]["products"]) == 0:
-                            complete = True
-                        for card in cards["data"]["products"]:
-                            name = card["name"]
-                            price_value = card["pricePerUnit"]
-                            # Convert float price to string with currency symbol
-                            price = (
-                                f"£{price_value:.2f}"
-                                if isinstance(price_value, (int, float))
-                                else str(price_value)
-                            )
-                            img = card["c_productImages"][0]
-                            url = card["path"]
-                            stock = card["c_availabilityModel"]["type"]
+            if not cards:
+                break
 
-                            found = {
-                                "Colour": 0x0000FF,
-                                "Title": name,
-                                "Image": f"https://assets.nintendo.eu/image/upload/v1654696477/{img}",
-                                "URL": f"https://store.nintendo.co.uk{url}",
-                                "Price": price,
-                                "Stock": "",
-                                "Website": self.name,
-                            }
+            if not isinstance(cards, dict) or "data" not in cards:
+                # Without this the same page would be requested forever.
+                log.warning("Unexpected response from API: no data key")
+                break
+            log.debug(f"{cards['data']}")
+            if cards["data"] is None:
+                log.warning("No data returned from API")
+                break
+            data = cards["data"]
+            if not isinstance(data, dict) or "products" not in data:
+                log.warning("Unexpected response from API: no products key")
+                break
 
-                            if stock in _AVAILABILITY:
-                                status, colour = _AVAILABILITY[stock]
-                            else:
-                                log.warning(
-                                    f"Unknown availability type {stock!r} for "
-                                    f"{name}; treating as out of stock"
-                                )
-                                status, colour = _AVAILABILITY["OutOfStock"]
-                            found["Colour"] = colour
-                            found["Stock"] = status.value
+            log.debug(f"{data['products']}")
+            if len(data["products"]) == 0:
+                complete = True
+            for card in data["products"]:
+                name = card["name"]
+                price_value = card["pricePerUnit"]
+                # Convert float price to string with currency symbol
+                price = (
+                    f"£{price_value:.2f}"
+                    if isinstance(price_value, (int, float))
+                    else str(price_value)
+                )
+                img = card["c_productImages"][0]
+                url = card["path"]
+                stock = card["c_availabilityModel"]["type"]
 
-                            release = _format_release_date(card.get("c_releaseDate"))
-                            if release is not None:
-                                found["Release"] = release
+                found: dict[str, Any] = {
+                    "Colour": 0x0000FF,
+                    "Title": name,
+                    "Image": f"https://assets.nintendo.eu/image/upload/v1654696477/{img}",
+                    "URL": f"https://store.nintendo.co.uk{url}",
+                    "Price": price,
+                    "Stock": "",
+                    "Website": self.name,
+                }
 
-                            if found not in all_found:
-                                all_found.append(found)
-                        self.params["offset"] += 24
-                        if self.params["offset"] > 500:
-                            break
-            else:
+                if stock in _AVAILABILITY:
+                    status, colour = _AVAILABILITY[stock]
+                else:
+                    log.warning(
+                        f"Unknown availability type {stock!r} for "
+                        f"{name}; treating as out of stock"
+                    )
+                    status, colour = _AVAILABILITY["OutOfStock"]
+                found["Colour"] = colour
+                found["Stock"] = status.value
+
+                release = _format_release_date(card.get("c_releaseDate"))
+                if release is not None:
+                    found["Release"] = release
+
+                if found not in all_found:
+                    all_found.append(found)
+            self.params["offset"] += 24
+            if self.params["offset"] > 500:
                 break
         return all_found

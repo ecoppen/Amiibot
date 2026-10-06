@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-import requests  # type: ignore
+import requests
 
 from constants import REQUEST_TIMEOUT
 from result import DeliveryResult, DeliveryStatus

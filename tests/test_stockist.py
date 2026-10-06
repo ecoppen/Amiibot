@@ -716,6 +716,30 @@ class TestNintendoUKSpecific:
 
         assert isinstance(result, list)
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            b'{"errors": ["boom"]}',
+            b'{"data": {}}',
+            b'{"data": {"other": []}}',
+            b'{"data": []}',
+            b'["unexpected"]',
+        ],
+    )
+    @patch("stockist.nintendouk.NintendoUK.scrape")
+    def test_nintendo_uk_unexpected_shape_stops_instead_of_looping(
+        self, mock_scrape, content, nintendo_uk
+    ):
+        """A reply with no products must end the run, not re-request the same page."""
+        mock_response = Mock()
+        mock_response.content = content
+        mock_scrape.return_value = mock_response
+
+        result = nintendo_uk.get_amiibo()
+
+        assert result == []
+        mock_scrape.assert_called_once()
+
     @patch("stockist.nintendouk.NintendoUK.scrape")
     def test_nintendo_uk_get_amiibo_out_of_stock(self, mock_scrape, nintendo_uk):
         """Test Nintendo UK handles out of stock items."""

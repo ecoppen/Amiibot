@@ -56,7 +56,7 @@ def _format_price(value: Any) -> str | None:
 
 
 class Gamestop(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
         # `sz` is the page size and the whole amiibo category is a few hundred
@@ -65,8 +65,8 @@ class Gamestop(Stockist):
         # out-of-stock items are listed and a restock can be spotted.
         self.params = {"start": 0, "sz": 300}
 
-    base_url = "https://www.gamestop.com/consoles-hardware/nintendo-switch/nintendo-switch-amiibo"
-    name = "Gamestop US"
+    base_url: str = "https://www.gamestop.com/consoles-hardware/nintendo-switch/nintendo-switch-amiibo"
+    name: str = "Gamestop US"
 
     def _parse_gtm_data(self, link: Tag) -> dict[str, Any] | None:
         """Parse the tile's `data-gtmdata` JSON attribute, which has everything."""
@@ -154,7 +154,7 @@ class Gamestop(Stockist):
             "release": release,
         }
 
-    def get_amiibo(self):
+    def get_amiibo(self) -> list[dict[str, Any]]:
         all_found = []
 
         response = self.scrape_with_selenium(

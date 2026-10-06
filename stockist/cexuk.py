@@ -48,7 +48,7 @@ _OUT_OF_STOCK_FILTER = " AND inStockOnline=0"
 
 
 class CexUK(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
         # The query string of every search request.
@@ -58,8 +58,8 @@ class CexUK(Stockist):
             "x-algolia-application-id": ALGOLIA_APP_ID,
         }
 
-    base_url = ALGOLIA_URL
-    name = "CeX UK"
+    base_url: str = ALGOLIA_URL
+    name: str = "CeX UK"
 
     def _search(self, stock_filter: str, page: int) -> dict[str, Any] | None:
         """Run one search request; None if it failed or the answer is unusable."""
@@ -175,7 +175,7 @@ class CexUK(Stockist):
                 return url
         return ""
 
-    def get_amiibo(self):
+    def get_amiibo(self) -> list[dict[str, Any]]:
         hits = self._list_all()
         if hits is None:
             return []

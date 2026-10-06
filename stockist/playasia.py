@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -22,13 +23,13 @@ _COLOURS = {
 
 
 class PlayAsia(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
         self.params = None
 
-    base_url = "https://www.play-asia.com/games/amiibos/14/712od"
-    name = "Playasia"
+    base_url: str = "https://www.play-asia.com/games/amiibos/14/712od"
+    name: str = "Playasia"
 
     def _page_url(self, page: int) -> str:
         # Play-Asia handles paging in JavaScript, from a "#fc=p:<page>" fragment.
@@ -95,7 +96,7 @@ class PlayAsia(Stockist):
                 pass
         return 1
 
-    def get_amiibo(self):
+    def get_amiibo(self) -> list[dict[str, Any]]:
         all_found: list[dict] = []
         total_pages = 1
         page = 1

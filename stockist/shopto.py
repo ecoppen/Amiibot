@@ -1,23 +1,26 @@
 import logging
+from typing import Any
 
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 from stockist.stockist import Stock, Stockist
+from stockist.utils import attr_text
 
 log = logging.getLogger(__name__)
 
 
 class Shopto(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
         self.params = None
 
-    base_url = "https://www.shopto.net/en/search/?input_search=amiibo"
-    name = "Shopto"
+    base_url: str = "https://www.shopto.net/en/search/?input_search=amiibo"
+    name: str = "Shopto"
 
-    def get_amiibo(self):
-        all_found = []
+    def get_amiibo(self) -> list[dict[str, Any]]:
+        all_found: list[dict[str, Any]] = []
 
         response = self.scrape(url=self.base_url, payload=self.params)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -30,6 +33,9 @@ class Shopto(Stockist):
             cards = soup.find_all("div", class_="itemlist2")
 
         for card in cards:
+            if not isinstance(card, Tag):
+                continue
+
             name = card.find_all(
                 "div",
                 attrs={
@@ -56,26 +62,20 @@ class Shopto(Stockist):
                 },
             )
 
-            if name and stock and price and img and url:
-                name = name[0]
-                stock = stock[0]
-                price = price[0]
-                img = img[0]
-                url = url[0]
-            else:
+            if not (name and stock and price and img and url):
                 continue
 
             found = {
                 "Colour": 0x0000FF,
-                "Title": name.text.strip(),
-                "Image": f"https://www.shopto.net{img['src'].strip()}",
-                "URL": f"https://www.shopto.net{url['href'].strip()}",
-                "Price": price.text.strip(),
+                "Title": name[0].text.strip(),
+                "Image": f"https://www.shopto.net{attr_text(img[0], 'src')}",
+                "URL": f"https://www.shopto.net{attr_text(url[0], 'href')}",
+                "Price": price[0].text.strip(),
                 "Stock": "",
                 "Website": self.name,
             }
 
-            if stock.text.strip() == "Sold out":
+            if stock[0].text.strip() == "Sold out":
                 found["Colour"] = 0xFF0000
                 found["Stock"] = Stock.OUT_OF_STOCK.value
             else:

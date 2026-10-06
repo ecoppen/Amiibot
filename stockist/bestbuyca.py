@@ -36,13 +36,13 @@ def _format_release_date(value: Any) -> str | None:
 
 
 class BestbuyCA(Stockist):
-    def __init__(self, messengers):
+    def __init__(self, messengers: list[str]) -> None:
         super().__init__(messengers=messengers)
 
         self.params = {"categoryid": 306351, "page": 1, "pageSize": 100}
 
-    base_url = "https://www.bestbuy.ca/api/v2/json/search"
-    name = "Bestbuy CA"
+    base_url: str = "https://www.bestbuy.ca/api/v2/json/search"
+    name: str = "Bestbuy CA"
     request_timeout = SLOW_REQUEST_TIMEOUT
 
     def _get_purchasable(self, skus: list[str]) -> dict[str, bool] | None:
@@ -79,7 +79,7 @@ class BestbuyCA(Stockist):
                 return None
         return purchasable
 
-    def get_amiibo(self):
+    def get_amiibo(self) -> list[dict[str, Any]]:
         all_found = []
 
         response = self.scrape(url=self.base_url, payload=self.params)

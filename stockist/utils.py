@@ -4,8 +4,9 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlencode
 
-import requests  # type: ignore
-from requests.adapters import HTTPAdapter  # type: ignore
+import requests
+from bs4.element import Tag
+from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from constants import FALLBACK_USER_AGENTS, REQUEST_TIMEOUT
@@ -103,14 +104,22 @@ def _guarded(send: Callable[[], Any]) -> Any:
         return empty_response
 
 
-def send_public_request(url, payload=None, timeout=REQUEST_TIMEOUT):
+def send_public_request(
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: float = REQUEST_TIMEOUT,
+) -> Any:
     url = build_url(url, payload)
     return _guarded(lambda: _get_session().get(url=url, timeout=timeout))
 
 
 def send_public_post(
-    url, params=None, data=None, headers=None, timeout=REQUEST_TIMEOUT
-):
+    url: str,
+    params: dict[str, Any] | None = None,
+    data: str | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = REQUEST_TIMEOUT,
+) -> Any:
     """POST through the shared session (so it has the same default headers).
 
     Unlike GET requests, POSTs are not retried.
@@ -120,3 +129,11 @@ def send_public_post(
             url=url, params=params, data=data, headers=headers, timeout=timeout
         )
     )
+
+
+def attr_text(tag: Tag, name: str) -> str:
+    """A tag's attribute as a stripped string; "" if it is missing."""
+    value = tag.get(name)
+    if isinstance(value, list):
+        value = " ".join(value)
+    return value.strip() if isinstance(value, str) else ""
