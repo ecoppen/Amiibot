@@ -92,9 +92,6 @@ To find a role ID, turn on Developer Mode in Discord (User Settings, Advanced), 
 
 Create a bot by messaging @BotFather and sending `/newbot`. Your chat ID is the number @userinfobot replies with; for a group it's negative. Send your bot `/start` once so it's allowed to message you. The token has to look like a real one (8 to 12 digits, a colon, then 30 to 50 letters, digits, underscores or hyphens) or validation fails.
 
-!!! warning "Telegram alerts aren't delivered yet"
-    The scraper sends alerts through each messenger's `send_embed_message`, and the Telegram messenger only implements `send_message`. At the moment a Telegram messenger passes validation and starts up, but every alert for it is skipped as if it were inactive. Discord is the only messenger that currently delivers alerts.
-
 ### Common fields
 
 | Field | Default | Notes |

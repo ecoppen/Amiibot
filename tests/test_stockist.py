@@ -751,3 +751,70 @@ class TestStockistIntegration:
 
             assert stockist.name is not None
             assert stockist.base_url is not None
+
+
+class TestSessionRetryConfig:
+    @pytest.fixture(autouse=True)
+    def fresh_session(self):
+        import stockist.utils as su
+
+        original = su._session
+        su._session = None
+        yield
+        su._session = original
+
+    def test_adapter_mounted_with_retry_config(self):
+        from requests.adapters import HTTPAdapter
+
+        from stockist.utils import _get_session
+
+        session = _get_session()
+        for prefix in ("https://", "http://"):
+            adapter = session.get_adapter(prefix + "example.com")
+            assert isinstance(adapter, HTTPAdapter)
+            retry = adapter.max_retries
+            assert retry.total == 2
+            assert retry.backoff_factor == 1
+            assert tuple(retry.status_forcelist) == (429, 500, 502, 503, 504)
+            assert set(retry.allowed_methods) == {"GET"}
+            assert retry.respect_retry_after_header is False
+            assert retry.raise_on_status is False
+
+    def test_session_is_shared_and_has_no_content_type_header(self):
+        from stockist.utils import _get_session
+
+        session = _get_session()
+        assert _get_session() is session
+        assert "Content-Type" not in session.headers
+        assert "User-Agent" in session.headers
+
+    @patch("stockist.utils._get_session")
+    def test_final_5xx_still_becomes_blank_response(self, mock_session_fn, caplog):
+        from stockist.utils import BlankResponse
+
+        response = requests.Response()
+        response.status_code = 503
+        response.url = "https://test.com"
+        mock_session = Mock()
+        mock_session.get.return_value = response
+        mock_session_fn.return_value = mock_session
+
+        with caplog.at_level("WARNING", logger="stockist.utils"):
+            result = send_public_request(url="https://test.com")
+
+        assert isinstance(result, BlankResponse)
+        assert "HTTP error" in caplog.text
+
+    @patch("stockist.utils._get_session")
+    def test_retry_error_becomes_blank_response(self, mock_session_fn, caplog):
+        from stockist.utils import BlankResponse
+
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.exceptions.RetryError("too many 503")
+        mock_session_fn.return_value = mock_session
+
+        with caplog.at_level("WARNING", logger="stockist.utils"):
+            result = send_public_request(url="https://test.com")
+
+        assert isinstance(result, BlankResponse)
+        assert "Retries exhausted" in caplog.text

@@ -481,6 +481,98 @@ class TestTelegram:
         assert result.status == DeliveryStatus.INACTIVE
 
 
+class TestTelegramEmbed:
+    @pytest.fixture
+    def telegram(self):
+        return Telegram(
+            name="test_telegram",
+            stockists=["test.com"],
+            active=True,
+            bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
+            chat_id="123456789",
+        )
+
+    @staticmethod
+    def _item(**overrides):
+        item = {
+            "Title": "Mario",
+            "Price": "£14.99",
+            "Stock": "In Stock",
+            "URL": "https://example.com/mario",
+            "Website": "example.com",
+            "Image": "https://example.com/mario.png",
+            "Colour": 0xFF0000,
+        }
+        item.update(overrides)
+        return item
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_payload_content(self, mock_get, telegram):
+        mock_get.return_value = DeliveryResult(
+            status=DeliveryStatus.SUCCESS,
+            messenger_name="test_telegram",
+            http_status=200,
+        )
+
+        result = telegram.send_embed_message(self._item())
+
+        assert result.status == DeliveryStatus.SUCCESS
+        mock_get.assert_called_once()
+        kwargs = mock_get.call_args.kwargs
+        assert kwargs["url"].endswith("/sendMessage")
+        params = kwargs["params"]
+        assert params["chat_id"] == "123456789"
+        assert params["parse_mode"] == "Markdown"
+        assert params["text"].splitlines() == [
+            "[Mario](https://example.com/mario)",
+            "*Price:* £14.99",
+            "*Stock:* In Stock",
+            "*Website:* example.com",
+        ]
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_release_included_when_present(self, mock_get, telegram):
+        telegram.send_embed_message(self._item(Release="2026-11-01"))
+        text = mock_get.call_args.kwargs["params"]["text"]
+        assert text.splitlines()[-1] == "*Release:* 2026-11-01"
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_release_absent_when_missing(self, mock_get, telegram):
+        telegram.send_embed_message(self._item())
+        assert "Release" not in mock_get.call_args.kwargs["params"]["text"]
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_markdown_specials_escaped(self, mock_get, telegram):
+        telegram.send_embed_message(
+            self._item(
+                Title="Link_Amiibo *Rare* [x] & <b> `y`",
+                Website="my_shop",
+                URL="https://example.com/a_(b)",
+            )
+        )
+        lines = mock_get.call_args.kwargs["params"]["text"].splitlines()
+        assert lines[0] == (
+            "[Link\\_Amiibo \\*Rare\\* \\[x] & <b> \\`y\\`]"
+            "(https://example.com/a_(b%29)"
+        )
+        assert "*Website:* my\\_shop" in lines
+
+    @patch("messenger.telegram.Telegram.send_get")
+    def test_inactive_sends_nothing(self, mock_get):
+        telegram = Telegram(
+            name="test_telegram",
+            stockists=["test.com"],
+            active=False,
+            bot_token="1234567890:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxs",
+            chat_id="123456789",
+        )
+
+        result = telegram.send_embed_message(self._item())
+
+        assert result.status == DeliveryStatus.INACTIVE
+        mock_get.assert_not_called()
+
+
 class TestMessageManager:
     def test_message_manager_initialization_discord(self):
         config = {

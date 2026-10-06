@@ -132,6 +132,7 @@ dmypy.json
 .idea/
 
 # Project specific
+.amiibot.lock
 config/config.json
 *.db
 log.txt

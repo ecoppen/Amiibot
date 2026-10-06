@@ -100,10 +100,6 @@ def cleanup() -> None:
         except Exception as e:
             log.warning(f"Error releasing lock: {e}")
         _lock_file = None
-        try:
-            _LOCK_PATH.unlink(missing_ok=True)
-        except Exception:
-            pass
     if _database is not None:
         try:
             log.info("Disposing database engine...")

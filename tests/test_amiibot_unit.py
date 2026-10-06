@@ -435,3 +435,22 @@ class TestImportSideEffects:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "False 0"
+
+
+class TestLockFile:
+    def test_cleanup_releases_lock_but_keeps_file(self, tmp_path):
+        import fcntl
+
+        import amiibot
+
+        lock_path = tmp_path / ".amiibot.lock"
+        with patch.object(amiibot, "_LOCK_PATH", lock_path):
+            amiibot._lock_file = open(lock_path, "w")
+            fcntl.flock(amiibot._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            amiibot.cleanup()
+
+            assert amiibot._lock_file is None
+            assert lock_path.exists()
+            with open(lock_path, "w") as second:
+                fcntl.flock(second, fcntl.LOCK_EX | fcntl.LOCK_NB)
