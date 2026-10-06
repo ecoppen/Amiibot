@@ -648,8 +648,14 @@ class TestDatabase:
             assert item is None or item.Website is not None
 
 
-def _datum(url="https://t.com/1", stock="In stock", price="$19.99", colour=0x00FF00):
-    return {
+def _datum(
+    url="https://t.com/1",
+    stock="In stock",
+    price="$19.99",
+    colour=0x00FF00,
+    release=None,
+):
+    datum = {
         "Title": f"Amiibo {url[-1]}",
         "Price": price,
         "Stock": stock,
@@ -658,6 +664,9 @@ def _datum(url="https://t.com/1", stock="In stock", price="$19.99", colour=0x00F
         "Image": "https://t.com/img.jpg",
         "Colour": colour,
     }
+    if release is not None:
+        datum["Release"] = release
+    return datum
 
 
 class TestOutboxChangeDetection:
@@ -749,6 +758,105 @@ class TestOutboxChangeDetection:
         assert events[0]["Colour"] == 0xFF0000
         assert self._item(database).Stock == "Out of Stock"
         assert len(self._outbox(database)) == 2
+
+    def test_pre_order_transitions_each_emit_one_event(self, database):
+        oos = {"stock": "Out of Stock", "colour": 0xFF0000}
+        pre = {"stock": "Pre-order", "colour": 0xFFA500}
+        database.check_then_add_or_update_amiibo([_datum(**oos)])
+
+        events = database.check_then_add_or_update_amiibo([_datum(**pre)])
+        assert [e["Stock"] for e in events] == ["Pre-order"]
+
+        events = database.check_then_add_or_update_amiibo([_datum()])
+        assert [e["Stock"] for e in events] == ["In stock"]
+
+        database.check_then_add_or_update_amiibo([_datum(**pre)])
+        self._expire_cooldown(database)
+        events = database.check_then_add_or_update_amiibo([_datum(**oos)])
+        assert [e["Stock"] for e in events] == ["Out of Stock"]
+
+        statuses = [r.stock_status for r in self._outbox(database)]
+        assert statuses == [
+            "Out of Stock",
+            "Pre-order",
+            "In stock",
+            "Pre-order",
+            "Out of Stock",
+        ]
+        assert self._item(database).Stock == "Out of Stock"
+
+    def test_pre_order_bypasses_cooldown(self, database):
+        pre = {"stock": "Pre-order", "colour": 0xFFA500}
+        database.check_then_add_or_update_amiibo([_datum(**pre)])
+        for _ in range(2):
+            # Flip the stored state silently so the next scrape sees a change
+            # to the status that was last notified, inside the cooldown.
+            with database.Session() as session:
+                item = session.query(AmiiboStock).one()
+                item.Stock = "Out of Stock"
+                session.commit()
+            events = database.check_then_add_or_update_amiibo([_datum(**pre)])
+            assert [e["Stock"] for e in events] == ["Pre-order"]
+        statuses = [r.stock_status for r in self._outbox(database)]
+        assert statuses == ["Pre-order"] * 3
+
+    def test_non_urgent_status_is_still_suppressed_by_cooldown(self, database):
+        oos = {"stock": "Out of Stock", "colour": 0xFF0000}
+        database.check_then_add_or_update_amiibo([_datum(**oos)])
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            item.Stock = "In stock"
+            session.commit()
+        assert database.check_then_add_or_update_amiibo([_datum(**oos)]) == []
+
+    def test_urgent_statuses(self):
+        from database import URGENT_STATUSES
+
+        assert URGENT_STATUSES == {"In stock", "Pre-order"}
+
+    def test_release_lands_in_outbox_for_new_item(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", colour=0xFFA500, release="12 Nov 2026")]
+        )
+        assert self._outbox(database)[0].release_date == "12 Nov 2026"
+
+    def test_release_lands_in_outbox_for_stock_change(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", colour=0xFFA500, release="12 Nov 2026")]
+        )
+        assert events[0]["Release"] == "12 Nov 2026"
+        rows = self._outbox(database)
+        assert rows[0].release_date is None
+        assert rows[1].release_date == "12 Nov 2026"
+
+    def test_release_is_not_stored_or_used_for_change_detection(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", release="12 Nov 2026")]
+        )
+        assert not hasattr(AmiiboStock, "Release")
+        assert (
+            database.check_then_add_or_update_amiibo(
+                [_datum(stock="Pre-order", release="1 Dec 2026")]
+            )
+            == []
+        )
+        assert (
+            database.check_then_add_or_update_amiibo([_datum(stock="Pre-order")]) == []
+        )
+        assert len(self._outbox(database)) == 1
+
+    def test_price_change_event_has_no_release(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", release="12 Nov 2026")]
+        )
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", price="$24.99", release="12 Nov 2026")]
+        )
+        assert "Release" not in events[0]
+        assert self._outbox(database)[-1].release_date is None
 
     def test_unchanged_item_emits_nothing(self, database):
         database.check_then_add_or_update_amiibo([_datum()])
@@ -1043,6 +1151,7 @@ class TestOutboxMigration:
         "attempts",
         "last_attempt_at",
         "completed_at",
+        "release_date",
     }
 
     @pytest.fixture
@@ -1103,6 +1212,7 @@ class TestOutboxMigration:
             assert row.status == "pending"
             assert row.attempts == 0
             assert row.price == ""
+            assert row.release_date is None
 
     def test_migrated_table_is_usable(self, database):
         database._run_migrations()

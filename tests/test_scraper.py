@@ -17,6 +17,7 @@ def _outbox_row(item, row_id=1, **overrides):
         price=item["Price"],
         image=item["Image"],
         colour=item["Colour"],
+        release_date=item.get("Release"),
         status="pending",
         attempts=0,
         created_at=datetime.now(),
@@ -455,10 +456,16 @@ class TestScraper:
         mock_database.record_healthy_scrape.assert_called_once_with("test.com", 1)
 
 
-def _scrape_item(stock="In stock", price="$19.99", url="https://t.com/1", colour=None):
+def _scrape_item(
+    stock="In stock",
+    price="$19.99",
+    url="https://t.com/1",
+    colour=None,
+    release=None,
+):
     if colour is None:
         colour = 0x00FF00 if stock == "In stock" else 0xFF0000
-    return {
+    item = {
         "Title": "Test Amiibo",
         "Price": price,
         "Stock": stock,
@@ -467,6 +474,9 @@ def _scrape_item(stock="In stock", price="$19.99", url="https://t.com/1", colour
         "Image": "https://t.com/img.jpg",
         "Colour": colour,
     }
+    if release is not None:
+        item["Release"] = release
+    return item
 
 
 def _result(status, http_status=None, name="m1"):
@@ -549,6 +559,28 @@ class TestScraperOutboxDelivery:
     @staticmethod
     def _sent_statuses(messenger):
         return [c[0][0]["Stock"] for c in messenger.send_embed_message.call_args_list]
+
+    def test_release_is_in_flushed_item_only_when_set(self, database):
+        m = self._messenger()
+        holder = {
+            "items": [
+                _scrape_item(
+                    "Pre-order",
+                    colour=0xFFA500,
+                    url="https://t.com/1",
+                    release="12 Nov 2026",
+                ),
+                _scrape_item(url="https://t.com/2"),
+            ]
+        }
+        scraper, _ = self._build(database, [m], holder)
+
+        scraper.scrape_cycle()
+
+        sent = {c[0][0]["URL"]: c[0][0] for c in m.send_embed_message.call_args_list}
+        assert sent["https://t.com/1"]["Release"] == "12 Nov 2026"
+        assert sent["https://t.com/1"]["Stock"] == "Pre-order"
+        assert "Release" not in sent["https://t.com/2"]
 
     def test_new_item_is_delivered_and_row_done(self, database):
         m = self._messenger()

@@ -3,6 +3,7 @@ Unit tests for stockist module.
 """
 
 import pytest
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from stockist.stockist import Stockist, Stock
 from stockist.manager import StockistManager, STOCKIST_FACTORY
@@ -30,10 +31,17 @@ class TestStock:
         assert Stock.IN_STOCK.value == "In stock"
         assert Stock.OUT_OF_STOCK.value == "Out of Stock"
         assert Stock.PRICE_CHANGE.value == "Price change"
+        assert Stock.PRE_ORDER.value == "Pre-order"
 
     def test_stock_enum_members(self):
         """Test Stock enum has all expected members."""
-        expected_members = ["DELISTED", "IN_STOCK", "OUT_OF_STOCK", "PRICE_CHANGE"]
+        expected_members = [
+            "DELISTED",
+            "IN_STOCK",
+            "OUT_OF_STOCK",
+            "PRICE_CHANGE",
+            "PRE_ORDER",
+        ]
         actual_members = [member.name for member in Stock]
         assert set(expected_members) == set(actual_members)
 
@@ -641,6 +649,90 @@ class TestNintendoUKSpecific:
         assert isinstance(result, list)
         if len(result) > 0:
             assert result[0]["Stock"] == Stock.OUT_OF_STOCK.value
+
+
+class TestNintendoUKAvailability:
+    """Availability mapping and release dates for Nintendo UK."""
+
+    @staticmethod
+    def _scrape(products):
+        import json
+
+        mock_response = Mock()
+        mock_response.content = json.dumps({"data": {"products": products}}).encode()
+        empty = Mock()
+        empty.content = b'{"data": {"products": []}}'
+        nintendo = NintendoUK(messengers=["m"])
+        with patch.object(NintendoUK, "scrape", side_effect=[mock_response, empty]):
+            return nintendo.get_amiibo()
+
+    @staticmethod
+    def _product(availability="InStock", **extra):
+        product = {
+            "name": "Test Amiibo",
+            "pricePerUnit": 19.99,
+            "c_productImages": ["test_image"],
+            "path": "/test-amiibo",
+            "c_availabilityModel": {"type": availability},
+        }
+        product.update(extra)
+        return product
+
+    @pytest.mark.parametrize(
+        "api_type, stock, colour",
+        [
+            ("InStock", Stock.IN_STOCK, 0x00FF00),
+            ("PreOrder", Stock.PRE_ORDER, 0xFFA500),
+            ("OutOfStock", Stock.OUT_OF_STOCK, 0xFF0000),
+        ],
+    )
+    def test_known_availability_types(self, api_type, stock, colour):
+        result = self._scrape([self._product(api_type)])
+        assert result[0]["Stock"] == stock.value
+        assert result[0]["Colour"] == colour
+
+    def test_unknown_type_is_out_of_stock_and_warns(self, caplog):
+        with caplog.at_level("WARNING", logger="stockist.nintendouk"):
+            result = self._scrape([self._product("BackOrder")])
+        assert result[0]["Stock"] == Stock.OUT_OF_STOCK.value
+        assert result[0]["Colour"] == 0xFF0000
+        warnings = [r for r in caplog.records if "BackOrder" in r.getMessage()]
+        assert len(warnings) == 1
+
+    def test_future_release_date_is_formatted(self):
+        future = date.today() + timedelta(days=30)
+        result = self._scrape(
+            [self._product("PreOrder", c_releaseDate=future.isoformat())]
+        )
+        assert result[0]["Release"] == f"{future.day} {future.strftime('%b %Y')}"
+
+    def test_release_date_format_example(self):
+        with patch("stockist.nintendouk.date") as mock_date:
+            mock_date.today.return_value = date(2026, 1, 1)
+            result = self._scrape(
+                [self._product("PreOrder", c_releaseDate="2026-11-12")]
+            )
+        assert result[0]["Release"] == "12 Nov 2026"
+
+    def test_release_date_today_is_kept(self):
+        today = date.today()
+        result = self._scrape([self._product(c_releaseDate=today.isoformat())])
+        assert "Release" in result[0]
+
+    def test_past_release_date_is_omitted(self):
+        past = date.today() - timedelta(days=1)
+        result = self._scrape([self._product(c_releaseDate=past.isoformat())])
+        assert "Release" not in result[0]
+
+    @pytest.mark.parametrize("value", [None, "", "garbage", "2026-13-45", 20261112, []])
+    def test_missing_or_bad_release_date_is_omitted(self, value):
+        result = self._scrape([self._product(c_releaseDate=value)])
+        assert len(result) == 1
+        assert "Release" not in result[0]
+
+    def test_missing_release_key_is_omitted(self):
+        result = self._scrape([self._product()])
+        assert "Release" not in result[0]
 
 
 class TestStockistIntegration:

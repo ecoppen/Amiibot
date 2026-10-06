@@ -4,11 +4,20 @@ Amiibot remembers every product it has seen at each shop, and on every run it co
 
 - a product shows up that it hasn't seen before
 - a product goes from out of stock to in stock, or the other way round
+- a product goes on pre-order, or moves from pre-order to in stock or out of stock
 - the price changes while the stock status stays the same (if both change you get a single stock alert carrying the new price)
 - a product has gone missing from the shop's listing (a delisting)
 - a delisted product comes back
 
 The first run against a shop alerts on every product it finds, in stock or not. That includes a shop you add to the config later. If you delete the database, the same thing happens again.
+
+## Pre-orders
+
+A pre-order is a product you can order before it is released. It gets its own "Pre-order" status, with an orange embed, so it isn't mistaken for a restock. Only Nintendo UK reports pre-orders. Other shops don't tell Amiibot the difference, so a pre-order there will look like any other status.
+
+When the shop gives a release date that is today or later, the alert has an extra "Release" field, for example "12 Nov 2026". The date is only shown in the alert. It is not remembered between runs, and a changed release date on its own doesn't trigger a new alert.
+
+If Nintendo UK reports a status Amiibot doesn't recognise, it is treated as out of stock and a warning is written to the log.
 
 ## Delisting
 
@@ -26,7 +35,7 @@ Sends are spaced `MESSAGE_SEND_DELAY` seconds apart (0.5). If Discord answers 42
 
 ## Cooldown
 
-To stop an item that's flapping from spamming you, a repeat alert of the same kind for the same item is suppressed for `NOTIFICATION_COOLDOWN_MINUTES` (60) after the last one was sent. The exception is "In stock" alerts, which are never suppressed. The change itself is still recorded, so the next alert compares against the up-to-date state.
+To stop an item that's flapping from spamming you, a repeat alert of the same kind for the same item is suppressed for `NOTIFICATION_COOLDOWN_MINUTES` (60) after the last one was sent. The exceptions are "In stock" and "Pre-order" alerts, which are never suppressed. The change itself is still recorded, so the next alert compares against the up-to-date state.
 
 ## Tuning
 

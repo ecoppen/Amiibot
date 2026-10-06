@@ -33,7 +33,13 @@ _OUTBOX_MIGRATION_COLUMNS: list[tuple[str, str]] = [
     ("attempts", "INTEGER DEFAULT 0"),
     ("last_attempt_at", "TIMESTAMP"),
     ("completed_at", "TIMESTAMP"),
+    ("release_date", "VARCHAR"),
 ]
+
+# Stock statuses that always notify, bypassing the repeat-alert cooldown.
+URGENT_STATUSES: frozenset[str] = frozenset(
+    {Stock.IN_STOCK.value, Stock.PRE_ORDER.value}
+)
 
 
 class Base(DeclarativeBase):
@@ -77,6 +83,7 @@ class NotificationOutbox(Base):
     attempts: Mapped[int] = mapped_column(default=0)
     last_attempt_at: Mapped[datetime | None] = mapped_column(nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    release_date: Mapped[str | None] = mapped_column(nullable=True)
 
 
 class NotificationDelivery(Base):
@@ -706,7 +713,7 @@ class Database:
         item.Colour = new_datum["Colour"]
         if self.remove_currency(new_datum["Price"]) != self.remove_currency(item.Price):
             item.Price = new_datum["Price"]
-        return {
+        event = {
             "Colour": new_datum["Colour"],
             "Title": item.Title,
             "Image": item.Image,
@@ -715,16 +722,19 @@ class Database:
             "Stock": new_datum["Stock"],
             "Website": item.Website,
         }
+        if new_datum.get("Release"):
+            event["Release"] = new_datum["Release"]
+        return event
 
     def _enqueue_event(
         self, session: Any, event: dict[str, Any], item: AmiiboStock
     ) -> bool:
         """Queue an event in the outbox unless the item's cooldown suppresses it.
 
-        In-stock events are never suppressed: missing a restock is the worst
-        outcome for users, so the cooldown only applies to the other statuses
-        (out of stock, price change, delisted). In-stock events still update
-        the item's last-notified bookkeeping.
+        Urgent events (in stock, pre-order) are never suppressed: missing a
+        restock is the worst outcome for users, so the cooldown only applies to
+        the other statuses (out of stock, price change, delisted). Urgent events
+        still update the item's last-notified bookkeeping.
 
         Runs inside the caller's transaction so that the state change and the
         pending notification are committed (or rolled back) together.
@@ -732,7 +742,7 @@ class Database:
         now = datetime.now()
         status = event["Stock"]
         if (
-            status != Stock.IN_STOCK.value
+            status not in URGENT_STATUSES
             and item.last_notified_at is not None
             and item.last_notified_status == status
             and now
@@ -751,6 +761,7 @@ class Database:
                 price=event["Price"],
                 image=event["Image"],
                 colour=event["Colour"],
+                release_date=event.get("Release"),
                 status=OUTBOX_PENDING,
                 attempts=0,
                 created_at=now,

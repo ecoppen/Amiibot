@@ -229,6 +229,40 @@ class TestDiscord:
             "Website": "test.com",
         }
 
+    def test_format_embed_data_includes_release_when_present(self, discord_messenger):
+        _, payload = discord_messenger.format_embed_data(
+            {"Price": "$19.99", "Release": "12 Nov 2026"}
+        )
+        assert payload == {"Price": "$19.99", "Release": "12 Nov 2026"}
+
+    @patch("messenger.discord.Discord.send_post")
+    def test_embed_has_release_field_only_when_present(
+        self, mock_post, discord_messenger
+    ):
+        mock_post.return_value = DeliveryResult(
+            status=DeliveryStatus.SUCCESS,
+            messenger_name="test_discord",
+            http_status=200,
+        )
+        item = {
+            "Title": "Test",
+            "Colour": 0xFFA500,
+            "URL": "https://test.com",
+            "Image": "https://test.com/img.jpg",
+            "Price": "$5.00",
+            "Stock": "Pre-order",
+            "Website": "test.com",
+        }
+
+        discord_messenger.send_embed_message(item)
+        fields = mock_post.call_args.kwargs["json"]["embeds"][0]["fields"]
+        assert "Release" not in [f["name"] for f in fields]
+
+        discord_messenger.send_embed_message({**item, "Release": "12 Nov 2026"})
+        fields = mock_post.call_args.kwargs["json"]["embeds"][0]["fields"]
+        release = [f for f in fields if f["name"] == "Release"]
+        assert release == [{"name": "Release", "value": "12 Nov 2026", "inline": True}]
+
     def test_format_embed_data_ignores_unknown_keys(self, discord_messenger):
         options, payload = discord_messenger.format_embed_data(
             {"Title": "Test", "Unknown": "ignored"}

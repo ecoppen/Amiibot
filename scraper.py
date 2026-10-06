@@ -285,6 +285,8 @@ class Scraper:
                 "Stock": row.stock_status,
                 "Website": row.website,
             }
+            if row.release_date:
+                item["Release"] = row.release_date
             all_final = True
             attempted = False
 

@@ -1,10 +1,32 @@
 import json
 import logging
-
+from datetime import date, datetime
+from typing import Any
 
 from stockist.stockist import Stock, Stockist
 
 log = logging.getLogger(__name__)
+
+# Availability types reported by the Nintendo UK API, mapped to a stock status
+# and embed colour. Anything not listed here is treated as out of stock.
+_AVAILABILITY: dict[str, tuple[Stock, int]] = {
+    "InStock": (Stock.IN_STOCK, 0x00FF00),
+    "PreOrder": (Stock.PRE_ORDER, 0xFFA500),
+    "OutOfStock": (Stock.OUT_OF_STOCK, 0xFF0000),
+}
+
+
+def _format_release_date(value: Any) -> str | None:
+    """Format a "YYYY-MM-DD" release date, or None unless it is today or later."""
+    if not isinstance(value, str):
+        return None
+    try:
+        release = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    if release < date.today():
+        return None
+    return f"{release.day} {release.strftime('%b %Y')}"
 
 
 class NintendoUK(Stockist):
@@ -43,12 +65,12 @@ class NintendoUK(Stockist):
 
             if len(cards) > 0:
                 if "data" in [*cards]:
-                    log.debug(f'{cards["data"]}')
+                    log.debug(f"{cards['data']}")
                     if cards["data"] is None:
                         log.warning("No data returned from API")
                         break
                     if "products" in cards["data"]:
-                        log.debug(f'{cards["data"]["products"]}')
+                        log.debug(f"{cards['data']['products']}")
                         if len(cards["data"]["products"]) == 0:
                             complete = True
                         for card in cards["data"]["products"]:
@@ -74,12 +96,20 @@ class NintendoUK(Stockist):
                                 "Website": self.name,
                             }
 
-                            if stock == "OutOfStock":
-                                found["Colour"] = 0xFF0000
-                                found["Stock"] = Stock.OUT_OF_STOCK.value
+                            if stock in _AVAILABILITY:
+                                status, colour = _AVAILABILITY[stock]
                             else:
-                                found["Colour"] = 0x00FF00
-                                found["Stock"] = Stock.IN_STOCK.value
+                                log.warning(
+                                    f"Unknown availability type {stock!r} for "
+                                    f"{name}; treating as out of stock"
+                                )
+                                status, colour = _AVAILABILITY["OutOfStock"]
+                            found["Colour"] = colour
+                            found["Stock"] = status.value
+
+                            release = _format_release_date(card.get("c_releaseDate"))
+                            if release is not None:
+                                found["Release"] = release
 
                             if found not in all_found:
                                 all_found.append(found)

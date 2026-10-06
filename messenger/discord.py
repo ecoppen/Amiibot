@@ -61,7 +61,7 @@ class Discord(Messenger):
             "URL": "url",
             "Image": "thumbnail",
         }
-        payload_keys = ["Price", "Stock", "Website"]
+        payload_keys = ["Price", "Stock", "Website", "Release"]
         options: dict[str, Any] = {}
         payload: dict[str, Any] = {}
         for k, v in embed_data.items():

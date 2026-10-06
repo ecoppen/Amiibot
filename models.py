@@ -20,6 +20,7 @@ class ScrapedProduct(BaseModel):
     Website: str = Field(max_length=100)
     Image: str = Field(max_length=MAX_IMAGE_LENGTH)
     Colour: int
+    Release: str | None = None
 
     @field_validator("Title", "Stock", "Website")
     @classmethod

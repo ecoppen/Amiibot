@@ -24,6 +24,7 @@ class Stock(Enum):
     IN_STOCK = "In stock"
     OUT_OF_STOCK = "Out of Stock"
     PRICE_CHANGE = "Price change"
+    PRE_ORDER = "Pre-order"
 
 
 class Stockist:
