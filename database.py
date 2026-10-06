@@ -15,7 +15,6 @@ from constants import (
     NOTIFICATION_COOLDOWN_MINUTES,
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
-from result import DeliveryStatus
 from stockist.stockist import URGENT_STATUSES, Stock
 
 log = logging.getLogger(__name__)
@@ -442,9 +441,7 @@ class Database:
         except ValueError:
             raise ValueError(f"Could not extract price from: {currency_string}")
 
-    def record_scrape_attempt(
-        self, stockist: str, item_count: int | None = None
-    ) -> None:
+    def record_scrape_attempt(self, stockist: str) -> None:
         with self.Session() as session:
             existing = session.query(LastScraped).filter_by(stockist=stockist).first()
             if existing is None:
@@ -452,9 +449,7 @@ class Database:
                     LastScraped(
                         stockist=stockist,
                         last_attempt_at=datetime.now(),
-                        last_healthy_count=(
-                            item_count if item_count is not None else 0
-                        ),
+                        last_healthy_count=0,
                     )
                 )
             else:
@@ -494,13 +489,6 @@ class Database:
                 existing.consecutive_unhealthy_obs += 1
             session.commit()
             return existing.consecutive_unhealthy_obs
-
-    def get_consecutive_unhealthy_obs(self, stockist: str) -> int:
-        with self.Session() as session:
-            record = session.query(LastScraped).filter_by(stockist=stockist).first()
-            if record is None:
-                return 0
-            return record.consecutive_unhealthy_obs
 
     def record_scraping_failure(self, stockist: str) -> int:
         """Record a scraping failure and return consecutive failure count.
@@ -594,62 +582,12 @@ class Database:
                 failure.alert_sent_at = None
                 session.commit()
 
-    def get_consecutive_failures(self, stockist: str) -> int:
-        """Get the number of consecutive failures for a stockist.
-
-        Args:
-            stockist: Name of the stockist
-
-        Returns:
-            Number of consecutive failures (0 if none)
-        """
-        with self.Session() as session:
-            failure = (
-                session.query(ScrapingFailure).filter_by(stockist=stockist).first()
-            )
-            if failure is None:
-                return 0
-            return failure.consecutive_failures
-
     def get_last_healthy_count(self, stockist: str) -> int:
         with self.Session() as session:
             record = session.query(LastScraped).filter_by(stockist=stockist).first()
             if record is None:
                 return 0
             return record.last_healthy_count
-
-    def should_suppress_notification(self, url: str, website: str, stock: str) -> bool:
-        """Check if a notification should be suppressed due to cooldown.
-
-        Args:
-            url: Product URL
-            website: Website name
-            stock: Current stock status string
-
-        Returns:
-            True if notification should be suppressed
-        """
-        with self.Session() as session:
-            item = (
-                session.query(AmiiboStock).filter_by(URL=url, Website=website).first()
-            )
-            if item and item.last_notified_at:
-                cooldown_end = item.last_notified_at + timedelta(
-                    minutes=NOTIFICATION_COOLDOWN_MINUTES
-                )
-                if datetime.now() < cooldown_end and item.last_notified_status == stock:
-                    return True
-        return False
-
-    def record_notification(self, url: str, website: str, stock: str) -> None:
-        with self.Session() as session:
-            item = (
-                session.query(AmiiboStock).filter_by(URL=url, Website=website).first()
-            )
-            if item:
-                item.last_notified_at = datetime.now()
-                item.last_notified_status = stock
-                session.commit()
 
     def record_delivery(
         self,
@@ -686,19 +624,6 @@ class Database:
             )
             session.add(delivery)
             session.commit()
-
-    def was_delivered_to(self, idempotency_key: str, messenger_name: str) -> bool:
-        with self.Session() as session:
-            delivery = (
-                session.query(NotificationDelivery)
-                .filter_by(
-                    idempotency_key=idempotency_key,
-                    messenger_name=messenger_name,
-                    delivery_status=DeliveryStatus.SUCCESS.value,
-                )
-                .first()
-            )
-            return delivery is not None
 
     def get_delivery_status(
         self, idempotency_key: str, messenger_name: str
@@ -744,11 +669,6 @@ class Database:
                 row.status = status
                 row.completed_at = datetime.now()
                 session.commit()
-
-    def _get_existing_items(self, website: str) -> list[AmiiboStock]:
-        """Retrieve all existing items for a website."""
-        with self.Session() as session:
-            return session.query(AmiiboStock).filter_by(Website=website).all()
 
     def _handle_price_change(
         self, session: Any, item: AmiiboStock, new_price: str
@@ -961,99 +881,3 @@ class Database:
             f"Deleted: {statistics['Deleted']}"
         )
         return output
-
-    def get_statistics(self) -> dict[str, int]:
-        """Get database statistics.
-
-        Returns:
-            Dictionary with counts of total items, stockists, etc.
-        """
-        with self.Session() as session:
-            total_items = session.query(AmiiboStock).count()
-            total_stockists = session.query(LastScraped).count()
-
-            stats = {
-                "total_amiibo": total_items,
-                "total_stockists": total_stockists,
-            }
-
-            log.debug(f"Database statistics: {stats}")
-            return stats
-
-    def cleanup_old_records(self, days_old: int = 30) -> int:
-        """Remove old scraped records older than specified days.
-
-        Args:
-            days_old: Number of days to keep records
-
-        Returns:
-            Number of records deleted
-        """
-        cutoff_date = datetime.now() - timedelta(days=days_old)
-
-        with self.Session() as session:
-            deleted = (
-                session.query(AmiiboStock)
-                .filter(AmiiboStock.timestamp < cutoff_date)
-                .delete()
-            )
-            session.commit()
-
-            if deleted > 0:
-                log.info(
-                    f"Cleaned up {deleted} old records (older than {days_old} days)"
-                )
-
-            return deleted
-
-    @staticmethod
-    def _validate_amiibo_data(data: dict[str, Any]) -> bool:
-        """Validate that amiibo data has all required fields.
-
-        Required fields:
-        - Title: str - Product title
-        - Price: str - Price string
-        - Stock: str - Stock status
-        - URL: str - Product URL
-        - Website: str - Website name
-        - Image: str - Image URL
-        - Colour: int - Discord color code
-
-        Args:
-            data: Dictionary containing amiibo data
-
-        Returns:
-            True if data is valid
-
-        Raises:
-            ValueError: If required fields are missing or invalid
-        """
-        required_fields = {
-            "Title": (str, "Product title"),
-            "Price": (str, "Price string"),
-            "Stock": (str, "Stock status"),
-            "URL": (str, "Product URL"),
-            "Website": (str, "Website name"),
-            "Image": (str, "Image URL"),
-            "Colour": (int, "Discord color code"),
-        }
-
-        missing_fields = []
-        invalid_fields = []
-
-        for field, (expected_type, description) in required_fields.items():
-            if field not in data:
-                missing_fields.append(f"{field} ({description})")
-            elif not isinstance(data[field], expected_type):
-                invalid_fields.append(
-                    f"{field}: expected {expected_type.__name__}, got {type(data[field]).__name__}"
-                )
-            elif isinstance(data[field], str) and not data[field].strip():
-                invalid_fields.append(f"{field}: empty string not allowed")
-
-        if missing_fields:
-            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
-        if invalid_fields:
-            raise ValueError(f"Invalid field types: {', '.join(invalid_fields)}")
-
-        return True

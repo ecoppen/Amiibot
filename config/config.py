@@ -47,13 +47,6 @@ class Stockist(Enum):
     THESOURCE = "thesource.ca"
 
 
-def _env_or_fallback(env_var: str, config_value: str | None, name: str) -> str | None:
-    env_val = os.environ.get(env_var)
-    if env_val:
-        return env_val
-    return config_value
-
-
 def _redact(value: str) -> str:
     for pattern, replacement in REDACTION_PATTERNS:
         value = pattern.sub(replacement, value)
@@ -78,6 +71,7 @@ _MENTION_PATTERN = re.compile(r"(@here|@everyone|<@&\d+>|<@\d+>)")
 
 class DiscordMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
     active: bool = False
+    # Accepted for compatibility with existing config.json files; ignored.
     embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.DISCORD.value]  # type: ignore
     webhook_url: str
@@ -135,6 +129,7 @@ class DiscordMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
 
 class TelegramMessengerConfig(BaseModel, use_enum_values=True, extra="forbid"):
     active: bool = False
+    # Accepted for compatibility with existing config.json files; ignored.
     embedded_messages: bool = True
     messenger_type: Literal[MESSENGER.TELEGRAM.value]  # type: ignore
     bot_token: str

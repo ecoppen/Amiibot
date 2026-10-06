@@ -7,7 +7,6 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from stockist.stockist import Stockist, Stock
 from stockist.manager import StockistManager, STOCKIST_FACTORY
-from stockist.useragents import UserAgent
 from stockist.utils import send_public_request
 from stockist.bestbuy import Bestbuy
 from stockist.bestbuyca import BestbuyCA
@@ -129,99 +128,6 @@ class TestStockist:
         result = stockist.scrape_with_selenium(url="https://test.com", payload=None)
 
         assert result == "<html>test</html>"
-
-
-class TestUserAgent:
-    """Test UserAgent class."""
-
-    def test_useragent_initialization(self):
-        """Test UserAgent initializes correctly."""
-        ua = UserAgent()
-        assert ua.base_agents is not None
-
-    def test_get_user_agents(self):
-        """Test get_user_agents returns list."""
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert isinstance(agents, list)
-        # Should have at least some user agents
-        assert len(agents) > 0
-
-    def test_user_agents_are_strings(self):
-        """Test that all user agents are strings."""
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        for agent in agents:
-            assert isinstance(agent, str)
-            assert len(agent) > 0
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_timeout_falls_back(self, mock_get):
-        """Test timeout falls back to base agents."""
-        mock_get.side_effect = requests.exceptions.Timeout
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_connection_error_falls_back(self, mock_get):
-        """Test connection error falls back to base agents."""
-        mock_get.side_effect = requests.exceptions.ConnectionError
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_http_error_falls_back(self, mock_get):
-        """Test HTTP error falls back to base agents."""
-        mock_get.side_effect = requests.exceptions.HTTPError
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_unexpected_error_falls_back(self, mock_get):
-        """Test unexpected error falls back to base agents."""
-        mock_get.side_effect = RuntimeError("boom")
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_success_updates_agents(self, mock_get):
-        """Test successful fetch updates base agents."""
-        mock_response = Mock()
-        mock_response.content = b"""
-        <html>
-            <textarea class="form-control">Mozilla/5.0 (X11; Linux) A</textarea>
-            <textarea class="form-control">Mozilla/5.0 (X11; Linux) B</textarea>
-        </html>
-        """
-        mock_get.return_value = mock_response
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert len(agents) == 2
-        assert agents[0].startswith("Mozilla/5.0 (X11; Linux) A")
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_no_textareas_keeps_base(self, mock_get):
-        """Test empty response keeps base agents."""
-        mock_response = Mock()
-        mock_response.content = b"<html></html>"
-        mock_get.return_value = mock_response
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
-
-    @patch("stockist.useragents.requests.get")
-    def test_get_user_agents_parse_error_keeps_base(self, mock_get):
-        """Test parse errors keep base agents."""
-        mock_response = Mock()
-        mock_response.content = None
-        mock_get.return_value = mock_response
-        ua = UserAgent()
-        agents = ua.get_user_agents()
-        assert agents == ua.base_agents
 
 
 class TestStockistUtils:

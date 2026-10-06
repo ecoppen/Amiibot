@@ -1,8 +1,6 @@
 import logging
-import time
 from typing import Any, Union
 
-from constants import MESSAGE_SEND_DELAY
 from messenger.discord import Discord
 from messenger.telegram import Telegram
 
@@ -71,26 +69,3 @@ class MessageManager:
             log.error("No messengers were set to true")
             return False
         return True
-
-    def send_message_to_all_messengers(self, message: str) -> None:
-        """Send a text message to all active messengers.
-
-        Args:
-            message: Message text to send
-        """
-        for messenger in self.all_messengers:
-            if messenger.active:
-                messenger.send_message(message=message)
-                time.sleep(MESSAGE_SEND_DELAY)
-
-    def send_embed_message_to_all_messengers(self, embed_data: dict[str, Any]) -> None:
-        """Send an embedded message to all active messengers.
-
-        Args:
-            embed_data: Dictionary containing message data
-        """
-        for messenger in self.all_messengers:
-            if messenger.active:
-                response = messenger.send_embed_message(embed_data=embed_data)
-                log.info(response)
-                time.sleep(MESSAGE_SEND_DELAY)

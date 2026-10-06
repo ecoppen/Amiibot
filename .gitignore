@@ -135,4 +135,4 @@ dmypy.json
 .amiibot.lock
 config/config.json
 *.db
-log.txt
+log.txt*

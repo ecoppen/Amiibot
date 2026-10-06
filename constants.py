@@ -1,7 +1,7 @@
 """
 Application constants for Amiibot.
 
-Centralized configuration for magic numbers, timeouts, colors, and other constants.
+Centralized configuration for magic numbers, timeouts, and other constants.
 """
 
 # ============================================================================
@@ -11,14 +11,8 @@ Centralized configuration for magic numbers, timeouts, colors, and other constan
 REQUEST_TIMEOUT = 5
 """Default timeout for HTTP requests."""
 
-SELENIUM_WAIT_TIME = 5
-"""Time to wait for JavaScript rendering in Selenium."""
-
 SELENIUM_WAIT_MAX = 20
 """Maximum wait time for Selenium WebDriver operations (page load, script, element wait)."""
-
-SELENIUM_STOCKIST_DEADLINE = 60
-"""Per-stockist total deadline in seconds for Selenium-based scrapes."""
 
 # ============================================================================
 # LOGGING SETTINGS
@@ -47,25 +41,6 @@ OUTBOX_MAX_ATTEMPTS = 5
 """Pending notifications that have been attempted this many times are expired."""
 
 # ============================================================================
-# STOCK STATUS COLORS (Discord embed colors)
-# ============================================================================
-
-COLOR_IN_STOCK = 0x00FF00
-"""Color for 'In Stock' status (green)."""
-
-COLOR_OUT_OF_STOCK = 0xFF0000
-"""Color for 'Out of Stock' status (red)."""
-
-COLOR_PRICE_CHANGE = 0xFFFFFF
-"""Color for 'Price Change' status (white)."""
-
-COLOR_DELISTED = 0xFF0000
-"""Color for 'Delisted' status (red)."""
-
-COLOR_DEFAULT = 0x0000FF
-"""Default color for other statuses (blue)."""
-
-# ============================================================================
 # SCRAPER SETTINGS
 # ============================================================================
 
@@ -74,10 +49,6 @@ MAX_RETRY_ATTEMPTS = 3
 
 RETRY_BACKOFF_FACTOR = 2
 """Multiplier for exponential backoff in retries."""
-
-MIN_ITEMS_THRESHOLD = 1
-"""Minimum number of items expected from scraper. If 0 items returned,
-   assume scraping failure and skip database update to prevent false notifications."""
 
 SCRAPING_FAILURE_GRACE_PERIOD = 2
 """Number of consecutive misses before declaring an item as genuinely delisted."""
@@ -106,13 +77,6 @@ DB_POOL_SIZE = 10
 
 DB_MAX_OVERFLOW = 20
 """Maximum overflow connections for database."""
-
-# ============================================================================
-# PARSING SETTINGS
-# ============================================================================
-
-MAX_PRICE_DECIMALS = 2
-"""Maximum decimal places for price parsing."""
 
 # ============================================================================
 # USER AGENT SETTINGS

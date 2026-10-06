@@ -87,61 +87,6 @@ class TestDatabase:
         with pytest.raises(ValueError):
             database.remove_currency("invalid")
 
-    def test_validate_amiibo_data_valid(self, database):
-        """Test data validation with valid data."""
-        valid_data = {
-            "Title": "Test Amiibo",
-            "Price": "$19.99",
-            "Stock": "In stock",
-            "URL": "https://example.com/test",
-            "Website": "example.com",
-            "Image": "https://example.com/image.jpg",
-            "Colour": 0x00FF00,
-        }
-        assert database._validate_amiibo_data(valid_data) is True
-
-    def test_validate_amiibo_data_missing_field(self, database):
-        """Test data validation with missing required field."""
-        invalid_data = {
-            "Title": "Test Amiibo",
-            "Price": "$19.99",
-            # Missing "Stock" field
-            "URL": "https://example.com/test",
-            "Website": "example.com",
-            "Image": "https://example.com/image.jpg",
-            "Colour": 0x00FF00,
-        }
-        with pytest.raises(ValueError, match="Missing required fields"):
-            database._validate_amiibo_data(invalid_data)
-
-    def test_validate_amiibo_data_empty_string(self, database):
-        """Test data validation with empty string."""
-        invalid_data = {
-            "Title": "",  # Empty title
-            "Price": "$19.99",
-            "Stock": "In stock",
-            "URL": "https://example.com/test",
-            "Website": "example.com",
-            "Image": "https://example.com/image.jpg",
-            "Colour": 0x00FF00,
-        }
-        with pytest.raises(ValueError, match="empty string not allowed"):
-            database._validate_amiibo_data(invalid_data)
-
-    def test_validate_amiibo_data_wrong_type(self, database):
-        """Test data validation with wrong data type."""
-        invalid_data = {
-            "Title": "Test Amiibo",
-            "Price": "$19.99",
-            "Stock": "In stock",
-            "URL": "https://example.com/test",
-            "Website": "example.com",
-            "Image": "https://example.com/image.jpg",
-            "Colour": "not_an_int",  # Should be int
-        }
-        with pytest.raises(ValueError, match="Invalid field types"):
-            database._validate_amiibo_data(invalid_data)
-
     def test_record_scrape_attempt(self, database):
         stockist = "test.com"
 
@@ -160,15 +105,6 @@ class TestDatabase:
             record = session.query(LastScraped).filter_by(stockist=stockist).first()
             assert record is not None
             assert record.last_attempt_at >= first_attempt
-
-    def test_get_statistics(self, database):
-        """Test getting database statistics."""
-        stats = database.get_statistics()
-        assert isinstance(stats, dict)
-        assert "total_amiibo" in stats
-        assert "total_stockists" in stats
-        assert isinstance(stats["total_amiibo"], int)
-        assert isinstance(stats["total_stockists"], int)
 
     def test_record_scraping_failure(self, database):
         """Test recording scraping failures."""
@@ -193,18 +129,13 @@ class TestDatabase:
         # Record some failures
         database.record_scraping_failure(stockist)
         database.record_scraping_failure(stockist)
-        assert database.get_consecutive_failures(stockist) == 2
+        assert database.get_failure_alert_state(stockist)[0] == 2
 
         # Record success
         database.record_scraping_success(stockist)
 
         # Verify failures reset
-        assert database.get_consecutive_failures(stockist) == 0
-
-    def test_get_consecutive_failures_nonexistent(self, database):
-        """Test getting failures for non-existent stockist."""
-        count = database.get_consecutive_failures("nonexistent.com")
-        assert count == 0
+        assert database.get_failure_alert_state(stockist)[0] == 0
 
     def test_check_then_add_or_update_amiibo_empty_data(self, database):
         """Test with empty data list."""
@@ -396,27 +327,20 @@ class TestDatabase:
         database.record_healthy_scrape(stockist, 42)
         assert database.get_last_healthy_count(stockist) == 42
 
-    def test_get_consecutive_unhealthy_obs(self, database):
+    def test_record_unhealthy_scrape_counts_up(self, database):
         stockist = "test_unhealthy.com"
-        assert database.get_consecutive_unhealthy_obs(stockist) == 0
 
-        count = database.record_unhealthy_scrape(stockist)
-        assert count == 1
-        assert database.get_consecutive_unhealthy_obs(stockist) == 1
-
-        count = database.record_unhealthy_scrape(stockist)
-        assert count == 2
-        assert database.get_consecutive_unhealthy_obs(stockist) == 2
+        assert database.record_unhealthy_scrape(stockist) == 1
+        assert database.record_unhealthy_scrape(stockist) == 2
 
     def test_healthy_scrape_resets_unhealthy_obs(self, database):
         stockist = "test_reset.com"
 
         database.record_unhealthy_scrape(stockist)
-        database.record_unhealthy_scrape(stockist)
-        assert database.get_consecutive_unhealthy_obs(stockist) == 2
+        assert database.record_unhealthy_scrape(stockist) == 2
 
         database.record_healthy_scrape(stockist, 10)
-        assert database.get_consecutive_unhealthy_obs(stockist) == 0
+        assert database.record_unhealthy_scrape(stockist) == 1
         assert database.get_last_healthy_count(stockist) == 10
 
     def test_record_healthy_scrape_sets_last_success(self, database):
@@ -429,114 +353,6 @@ class TestDatabase:
             assert record is not None
             assert record.last_success_at is not None
             assert record.last_healthy_count == 25
-
-    def test_notification_suppression_cooldown(self, database):
-        """Test that notifications are suppressed within the cooldown period."""
-        data = [
-            {
-                "Title": "Test Amiibo",
-                "Price": "$19.99",
-                "Stock": "In stock",
-                "URL": "https://test.com/notify",
-                "Website": "test_notify.com",
-                "Image": "https://test.com/img.jpg",
-                "Colour": 0x00FF00,
-            }
-        ]
-        database.check_then_add_or_update_amiibo(data)
-
-        # Enqueueing the new item's event already recorded a notification
-        assert database.should_suppress_notification(
-            "https://test.com/notify", "test_notify.com", "In stock"
-        )
-
-        # Clear it, then record a notification explicitly
-        with database.Session() as session:
-            item = session.query(AmiiboStock).one()
-            item.last_notified_at = None
-            item.last_notified_status = None
-            session.commit()
-        assert not database.should_suppress_notification(
-            "https://test.com/notify", "test_notify.com", "In stock"
-        )
-        database.record_notification(
-            "https://test.com/notify", "test_notify.com", "In stock"
-        )
-
-        # Should now be suppressed (same status within cooldown)
-        assert database.should_suppress_notification(
-            "https://test.com/notify", "test_notify.com", "In stock"
-        )
-
-        # Different status should NOT be suppressed
-        assert not database.should_suppress_notification(
-            "https://test.com/notify", "test_notify.com", "Delisted"
-        )
-
-    def test_notification_suppression_nonexistent_item(self, database):
-        """Test that suppression check returns False for items not in DB."""
-        assert not database.should_suppress_notification(
-            "https://nonexistent.com/item", "no_site.com", "In stock"
-        )
-
-    def test_cleanup_old_records(self, database):
-        """Test cleaning up old records."""
-        # Add an old item manually
-        with database.Session() as session:
-            old_item = AmiiboStock(
-                Website="old.com",
-                Title="Old Amiibo",
-                Price="$19.99",
-                Stock="In stock",
-                Colour="0x00FF00",
-                URL="https://old.com/1",
-                Image="https://old.com/img.jpg",
-                timestamp=datetime.now() - timedelta(days=60),
-            )
-            session.add(old_item)
-
-            recent_item = AmiiboStock(
-                Website="recent.com",
-                Title="Recent Amiibo",
-                Price="$19.99",
-                Stock="In stock",
-                Colour="0x00FF00",
-                URL="https://recent.com/1",
-                Image="https://recent.com/img.jpg",
-                timestamp=datetime.now(),
-            )
-            session.add(recent_item)
-            session.commit()
-
-        # Clean up records older than 30 days
-        deleted = database.cleanup_old_records(days_old=30)
-        assert deleted >= 1
-
-        # Verify recent item still exists
-        with database.Session() as session:
-            items = session.query(AmiiboStock).filter_by(Website="recent.com").all()
-            assert len(items) == 1
-
-    def test_get_existing_items(self, database):
-        """Test getting existing items for a website."""
-        # Add some items
-        data = [
-            {
-                "Title": "Test Amiibo",
-                "Price": "$19.99",
-                "Stock": "In stock",
-                "URL": "https://existing.com/1",
-                "Website": "existing.com",
-                "Image": "https://existing.com/img.jpg",
-                "Colour": 0x00FF00,
-            }
-        ]
-        database.check_then_add_or_update_amiibo(data)
-
-        # Get existing items
-        items = database._get_existing_items("existing.com")
-        assert len(items) >= 1
-        assert items[0].Website == "existing.com"
 
     def test_scraping_failure_timestamp_updates(self, database):
         """Test that failure timestamps are updated correctly."""
@@ -566,13 +382,13 @@ class TestDatabase:
 
         assert second_failure_time > first_failure_time
 
-    def test_record_delivery_and_was_delivered(self, database):
+    def test_record_delivery_and_get_delivery_status(self, database):
         """Test delivery recording and lookup."""
         from result import DeliveryStatus
 
         key = "outbox:1"
 
-        assert database.was_delivered_to(key, "discord") is False
+        assert database.get_delivery_status(key, "discord") is None
 
         database.record_delivery(
             idempotency_key=key,
@@ -584,8 +400,8 @@ class TestDatabase:
             delivery_status=DeliveryStatus.SUCCESS.value,
         )
 
-        assert database.was_delivered_to(key, "discord") is True
-        assert database.was_delivered_to(key, "telegram") is False
+        assert database.get_delivery_status(key, "discord") == "success"
+        assert database.get_delivery_status(key, "telegram") is None
 
     def test_record_delivery_is_idempotent(self, database):
         """Test duplicate deliveries are not recorded twice."""
@@ -620,8 +436,8 @@ class TestDatabase:
             )
             assert count == 1
 
-    def test_was_delivered_false_for_failed_status(self, database):
-        """Test failed deliveries do not count as delivered."""
+    def test_failed_delivery_status_is_recorded(self, database):
+        """Test failed deliveries are recorded as failures."""
         from result import DeliveryStatus
 
         key = "failed-key"
@@ -636,7 +452,7 @@ class TestDatabase:
             delivery_status=DeliveryStatus.PERMANENT_FAILURE.value,
         )
 
-        assert database.was_delivered_to(key, "discord") is False
+        assert database.get_delivery_status(key, "discord") == "permanent_failure"
 
     def test_run_migrations_is_idempotent(self, database):
         """Test migrations can run multiple times without error."""
@@ -1129,13 +945,11 @@ class TestOutboxStorage:
             messenger_name="discord",
         )
         database.record_delivery(delivery_status="transient_failure", **kwargs)
-        assert database.was_delivered_to("outbox:1", "discord") is False
         assert (
             database.get_delivery_status("outbox:1", "discord") == "transient_failure"
         )
 
         database.record_delivery(delivery_status="success", **kwargs)
-        assert database.was_delivered_to("outbox:1", "discord") is True
         assert database.get_delivery_status("outbox:1", "discord") == "success"
         assert database.get_delivery_status("outbox:1", "telegram") is None
         with database.Session() as session:
