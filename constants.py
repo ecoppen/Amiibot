@@ -68,6 +68,14 @@ CONSECUTIVE_UNHEALTHY_THRESHOLD = 2
 NOTIFICATION_COOLDOWN_MINUTES = 60
 """Minimum minutes between sending the same notification for an item with the same status."""
 
+FLAP_TRANSITION_THRESHOLD = 3
+"""Stock status transitions needed, each within FLAP_WINDOW_MINUTES of the last,
+   before an item counts as flapping."""
+
+FLAP_WINDOW_MINUTES = 120
+"""A stock transition more than this many minutes after the previous one starts a
+   fresh flap count."""
+
 # ============================================================================
 # DATABASE SETTINGS
 # ============================================================================

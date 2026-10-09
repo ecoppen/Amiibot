@@ -13,6 +13,8 @@ from config.config import DatabaseConfig as Database_
 from constants import (
     DB_MAX_OVERFLOW,
     DB_POOL_SIZE,
+    FLAP_TRANSITION_THRESHOLD,
+    FLAP_WINDOW_MINUTES,
     NOTIFICATION_COOLDOWN_MINUTES,
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
@@ -41,6 +43,8 @@ _MIGRATION_ADDITIONS: list[tuple[str, str, str]] = [
     ("amiibo_stock", "is_active", "BOOLEAN DEFAULT {true}"),
     ("amiibo_stock", "delisted_at", "TIMESTAMP"),
     ("amiibo_stock", "first_seen_at", "TIMESTAMP"),
+    ("amiibo_stock", "flap_count", "INTEGER DEFAULT 0"),
+    ("amiibo_stock", "last_flap_at", "TIMESTAMP"),
     ("last_scraped", "last_attempt_at", "TIMESTAMP DEFAULT {now_utc}"),
     ("last_scraped", "last_healthy_count", "INTEGER DEFAULT 0"),
     ("last_scraped", "last_success_at", "TIMESTAMP"),
@@ -129,6 +133,8 @@ class AmiiboStock(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
     delisted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     first_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    flap_count: Mapped[int] = mapped_column(default=0)
+    last_flap_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class NotificationOutbox(Base):
@@ -619,29 +625,58 @@ class Database:
             event["Release"] = new_datum["Release"]
         return event
 
+    @staticmethod
+    def _record_stock_transition(item: AmiiboStock, now: datetime) -> None:
+        """Count a stock status transition towards the item's flap count."""
+        if item.last_flap_at is None or now - item.last_flap_at > timedelta(
+            minutes=FLAP_WINDOW_MINUTES
+        ):
+            item.flap_count = 1
+        else:
+            item.flap_count += 1
+        item.last_flap_at = now
+
+    @staticmethod
+    def _is_flapping(item: AmiiboStock, now: datetime) -> bool:
+        """Whether the item has changed stock status often and recently enough."""
+        return (
+            item.flap_count >= FLAP_TRANSITION_THRESHOLD
+            and item.last_flap_at is not None
+            and now - item.last_flap_at <= timedelta(minutes=FLAP_WINDOW_MINUTES)
+        )
+
     def _enqueue_event(
         self, session: Any, event: dict[str, Any], item: AmiiboStock
     ) -> bool:
         """Queue an event in the outbox unless the item's cooldown suppresses it.
 
-        Urgent events (in stock, pre-order) are never suppressed: missing a
-        restock is the worst outcome for users, so the cooldown only applies to
-        the other statuses (out of stock, price change, delisted). Urgent events
-        still update the item's last-notified bookkeeping.
+        Urgent events (in stock, pre-order) are normally never suppressed:
+        missing a restock is the worst outcome for users, so the cooldown only
+        applies to the other statuses (out of stock, price change, delisted).
+        Urgent events still update the item's last-notified bookkeeping.
+
+        A flapping item (see ``_is_flapping``) is damped instead: its out of
+        stock events are dropped, and its urgent events are subject to the same
+        cooldown as any other status, so it alerts at most once per cooldown.
 
         Runs inside the caller's transaction so that the state change and the
         pending notification are committed (or rolled back) together.
         """
         now = utcnow()
         status = event["Stock"]
+        flapping = self._is_flapping(item, now)
+        if flapping and status == Stock.OUT_OF_STOCK.value:
+            log.info(f"Skipping notification for {item.Title} (Out of Stock, flapping)")
+            return False
         if (
-            status not in URGENT_STATUSES
+            (status not in URGENT_STATUSES or flapping)
             and item.last_notified_at is not None
             and item.last_notified_status == status
             and now
             < item.last_notified_at + timedelta(minutes=NOTIFICATION_COOLDOWN_MINUTES)
         ):
-            log.info(f"Skipping notification for {item.Title} ({status}, cooldown)")
+            reason = "flapping, cooldown" if flapping else "cooldown"
+            log.info(f"Skipping notification for {item.Title} ({status}, {reason})")
             return False
         item.last_notified_at = now
         item.last_notified_status = status
@@ -680,6 +715,7 @@ class Database:
                 timestamp=now,
                 is_active=True,
                 first_seen_at=now,
+                flap_count=0,
             )
             session.add(amiibo)
             # New items are never suppressed by the cooldown.
@@ -731,6 +767,7 @@ class Database:
                             item.delisted_at = None
                             event = self._handle_stock_change(session, item, new_datum)
                         elif new_datum["Stock"] != item.Stock:
+                            self._record_stock_transition(item, utcnow())
                             event = self._handle_stock_change(session, item, new_datum)
                         elif self._prices_differ(item.Price, new_datum["Price"]):
                             event = self._handle_price_change(

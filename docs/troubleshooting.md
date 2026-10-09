@@ -41,7 +41,7 @@ On a Raspberry Pi or other ARM Linux box that automatic download often doesn't w
 Work through these in order:
 
 1. Is the messenger `"active": true`? An inactive one scrapes but never sends.
-2. Did the run log `Queued N notification(s)`? If not, nothing changed, or the change was inside the 60-minute cooldown (the log says `cooldown`).
+2. Did the run log `Queued N notification(s)`? If not, nothing changed, or the change was inside the 60-minute cooldown or dropped because the item was flapping (the log says `cooldown` or `flapping`).
 3. If it queued some, look at what happened to them:
 
     ```bash

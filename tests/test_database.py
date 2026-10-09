@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 
 from config.config import DatabaseConfig
+from constants import FLAP_WINDOW_MINUTES, SCRAPING_FAILURE_GRACE_PERIOD
 from database import (
     AmiiboStock,
     Database,
@@ -588,6 +589,7 @@ class TestOutboxChangeDetection:
 
         database.check_then_add_or_update_amiibo([_datum(**pre)])
         self._expire_cooldown(database)
+        self._age_flaps(database, FLAP_WINDOW_MINUTES + 1)
         events = database.check_then_add_or_update_amiibo([_datum(**oos)])
         assert [e["Stock"] for e in events] == ["Out of Stock"]
 
@@ -746,19 +748,102 @@ class TestOutboxChangeDetection:
         assert item.last_notified_status == "In stock"
         assert item.last_notified_at is not None
 
-    def test_stock_flap_within_cooldown_tracks_state_and_notifies(self, database):
-        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+    def _flap(self, database, sequence):
+        """Scrape each stock in turn and return the event statuses sent."""
         returned = []
-        for stock in ["In stock", "Out of Stock", "In stock", "Out of Stock"]:
+        for stock in sequence:
             events = database.check_then_add_or_update_amiibo([_datum(stock=stock)])
             returned.extend(e["Stock"] for e in events)
             # Stored state follows the scrape whether or not an event was queued.
             assert self._item(database).Stock == stock
+        return returned
 
-        # Each in-stock event records "In stock" as the last notified status, so
-        # no Out of Stock transition here repeats the last notified status.
-        assert returned == ["In stock", "Out of Stock", "In stock", "Out of Stock"]
-        assert len(self._outbox(database)) == 5
+    @staticmethod
+    def _age_flaps(database, minutes):
+        with database.Session() as session:
+            for item in session.query(AmiiboStock).all():
+                item.last_flap_at = utcnow() - timedelta(minutes=minutes)
+            session.commit()
+
+    def test_stock_flap_within_cooldown_tracks_state_and_notifies(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        returned = self._flap(
+            database, ["In stock", "Out of Stock", "In stock", "Out of Stock"]
+        )
+
+        # The 3rd transition reaches the flap threshold, but the last alert was
+        # Out of Stock so its In stock is not a repeat and is still sent. The
+        # 4th (Out of Stock) is dropped.
+        assert returned == ["In stock", "Out of Stock", "In stock"]
+        assert len(self._outbox(database)) == 4
+        assert self._item(database).flap_count == 4
+
+        # From here the In stock alerts are held to the cooldown.
+        assert self._flap(database, ["In stock", "Out of Stock", "In stock"]) == []
+        assert len(self._outbox(database)) == 4
+
+    def test_flapping_in_stock_sent_after_cooldown_but_out_of_stock_dropped(
+        self, database
+    ):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        self._flap(database, ["In stock", "Out of Stock", "In stock", "Out of Stock"])
+        self._expire_cooldown(database)
+
+        returned = self._flap(database, ["In stock", "Out of Stock"])
+
+        assert returned == ["In stock"]
+        assert self._item(database).flap_count == 6
+
+    def test_two_transitions_do_not_trigger_damping(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        returned = self._flap(database, ["In stock", "Out of Stock"])
+
+        assert returned == ["In stock", "Out of Stock"]
+        assert self._item(database).flap_count == 2
+
+    def test_transition_after_window_resets_flap_count(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        self._flap(database, ["In stock", "Out of Stock", "In stock"])
+        assert self._item(database).flap_count == 3
+
+        self._age_flaps(database, FLAP_WINDOW_MINUTES + 1)
+        returned = self._flap(database, ["Out of Stock"])
+
+        # No longer flapping, so the Out of Stock alert is sent again.
+        assert returned == ["Out of Stock"]
+        assert self._item(database).flap_count == 1
+
+    def test_price_change_and_relisting_do_not_count_as_flaps(self, database):
+        keep = _datum("https://t.com/1", price="$19.99")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+        database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1", price="$24.99"), gone]
+        )
+        assert self._item(database).flap_count == 0
+
+        # Delist the second item, then bring it back.
+        for _ in range(SCRAPING_FAILURE_GRACE_PERIOD):
+            database.check_then_add_or_update_amiibo([keep])
+        assert not self._item(database, "https://t.com/2").is_active
+        database.check_then_add_or_update_amiibo([keep, gone])
+
+        item = self._item(database, "https://t.com/2")
+        assert item.is_active
+        assert item.flap_count == 0
+        assert item.last_flap_at is None
+
+    def test_new_item_alerts_while_another_item_flaps(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        self._flap(database, ["In stock", "Out of Stock", "In stock"])
+        assert self._item(database).flap_count == 3
+
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="In stock"), _datum("https://t.com/2", stock="Out of Stock")]
+        )
+
+        assert [e["URL"] for e in events] == ["https://t.com/2"]
+        assert self._item(database, "https://t.com/2").flap_count == 0
 
     def test_out_of_stock_still_subject_to_cooldown(self, database):
         database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
@@ -1248,6 +1333,50 @@ class TestOutboxMigration:
         database.check_then_add_or_update_amiibo([_datum()])
         assert len(database.get_pending_outbox("t.com")) == 1
         assert len(database.get_pending_outbox("w")) == 1
+
+
+class TestFlapColumnsMigration:
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_flap_mig_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        with db.engine.begin() as conn:
+            conn.execute(sa.text("DROP TABLE amiibo_stock"))
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE amiibo_stock ("
+                    'id INTEGER NOT NULL PRIMARY KEY, "Website" VARCHAR NOT NULL, '
+                    '"Title" VARCHAR NOT NULL, "Price" VARCHAR NOT NULL, '
+                    '"Stock" VARCHAR NOT NULL, "Colour" VARCHAR NOT NULL, '
+                    '"URL" VARCHAR NOT NULL, "Image" VARCHAR NOT NULL, '
+                    "timestamp DATETIME NOT NULL)"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO amiibo_stock VALUES "
+                    "(1, 'w', 't', '1', 'In stock', 'c', 'u', 'i', '2026-01-01 00:00:00')"
+                )
+            )
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    def test_old_table_gets_flap_columns_and_is_idempotent(self, database):
+        database._run_migrations()
+        database._run_migrations()
+
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            assert item.flap_count == 0
+            assert item.last_flap_at is None
 
 
 class TestFailureAlertState:
