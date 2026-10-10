@@ -72,9 +72,12 @@ FLAP_TRANSITION_THRESHOLD = 3
 """Stock status transitions needed, each within FLAP_WINDOW_MINUTES of the last,
    before an item counts as flapping."""
 
-FLAP_WINDOW_MINUTES = 120
+FLAP_WINDOW_MINUTES = 720
 """A stock transition more than this many minutes after the previous one starts a
    fresh flap count."""
+
+FLAP_ALERT_COOLDOWN_MINUTES = 720
+"""Minimum minutes between In stock / Pre-order alerts for an item that is flapping."""
 
 # ============================================================================
 # DATABASE SETTINGS

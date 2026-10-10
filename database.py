@@ -13,6 +13,7 @@ from config.config import DatabaseConfig as Database_
 from constants import (
     DB_MAX_OVERFLOW,
     DB_POOL_SIZE,
+    FLAP_ALERT_COOLDOWN_MINUTES,
     FLAP_TRANSITION_THRESHOLD,
     FLAP_WINDOW_MINUTES,
     NOTIFICATION_COOLDOWN_MINUTES,
@@ -656,8 +657,8 @@ class Database:
         Urgent events still update the item's last-notified bookkeeping.
 
         A flapping item (see ``_is_flapping``) is damped instead: its out of
-        stock events are dropped, and its urgent events are subject to the same
-        cooldown as any other status, so it alerts at most once per cooldown.
+        stock events are dropped, and its urgent events are held to the longer
+        ``FLAP_ALERT_COOLDOWN_MINUTES`` cooldown instead of being sent every time.
 
         Runs inside the caller's transaction so that the state change and the
         pending notification are committed (or rolled back) together.
@@ -668,12 +669,16 @@ class Database:
         if flapping and status == Stock.OUT_OF_STOCK.value:
             log.info(f"Skipping notification for {item.Title} (Out of Stock, flapping)")
             return False
+        cooldown = timedelta(
+            minutes=FLAP_ALERT_COOLDOWN_MINUTES
+            if flapping
+            else NOTIFICATION_COOLDOWN_MINUTES
+        )
         if (
             (status not in URGENT_STATUSES or flapping)
             and item.last_notified_at is not None
             and item.last_notified_status == status
-            and now
-            < item.last_notified_at + timedelta(minutes=NOTIFICATION_COOLDOWN_MINUTES)
+            and now < item.last_notified_at + cooldown
         ):
             reason = "flapping, cooldown" if flapping else "cooldown"
             log.info(f"Skipping notification for {item.Title} ({status}, {reason})")

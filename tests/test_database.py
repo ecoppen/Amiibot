@@ -10,7 +10,11 @@ import pytest
 import sqlalchemy as sa
 
 from config.config import DatabaseConfig
-from constants import FLAP_WINDOW_MINUTES, SCRAPING_FAILURE_GRACE_PERIOD
+from constants import (
+    FLAP_ALERT_COOLDOWN_MINUTES,
+    FLAP_WINDOW_MINUTES,
+    SCRAPING_FAILURE_GRACE_PERIOD,
+)
 from database import (
     AmiiboStock,
     Database,
@@ -517,11 +521,11 @@ class TestOutboxChangeDetection:
             return session.query(AmiiboStock).filter_by(URL=url).one()
 
     @staticmethod
-    def _expire_cooldown(database):
+    def _expire_cooldown(database, minutes=120):
         with database.Session() as session:
             for item in session.query(AmiiboStock).all():
                 if item.last_notified_at:
-                    item.last_notified_at = utcnow() - timedelta(hours=2)
+                    item.last_notified_at = utcnow() - timedelta(minutes=minutes)
             session.commit()
 
     def test_new_items_enqueue_outbox_rows(self, database):
@@ -787,12 +791,32 @@ class TestOutboxChangeDetection:
     ):
         database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
         self._flap(database, ["In stock", "Out of Stock", "In stock", "Out of Stock"])
-        self._expire_cooldown(database)
+        self._expire_cooldown(database, FLAP_ALERT_COOLDOWN_MINUTES + 1)
 
         returned = self._flap(database, ["In stock", "Out of Stock"])
 
         assert returned == ["In stock"]
         assert self._item(database).flap_count == 6
+
+    def test_flapping_in_stock_held_to_flap_cooldown(self, database, caplog):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        self._flap(database, ["In stock", "Out of Stock", "In stock", "Out of Stock"])
+        assert self._item(database).last_notified_status == "In stock"
+        outbox_size = len(self._outbox(database))
+
+        # The normal 2 hour cooldown is not enough for a flapping item.
+        self._expire_cooldown(database)
+        with caplog.at_level("INFO"):
+            returned = self._flap(database, ["In stock"])
+        assert returned == []
+        assert "flapping, cooldown" in caplog.text
+        assert len(self._outbox(database)) == outbox_size
+
+        # Once the flap cooldown has passed, the next In stock is sent.
+        self._flap(database, ["Out of Stock"])
+        self._expire_cooldown(database, FLAP_ALERT_COOLDOWN_MINUTES + 1)
+        assert self._flap(database, ["In stock"]) == ["In stock"]
+        assert len(self._outbox(database)) == outbox_size + 1
 
     def test_two_transitions_do_not_trigger_damping(self, database):
         database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
@@ -844,6 +868,24 @@ class TestOutboxChangeDetection:
 
         assert [e["URL"] for e in events] == ["https://t.com/2"]
         assert self._item(database, "https://t.com/2").flap_count == 0
+
+    def test_non_flapping_repeat_uses_normal_cooldown(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])
+        event = _datum(stock="Out of Stock")
+
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            assert database._enqueue_event(session, event, item) is False
+            session.commit()
+
+        # 2 hours is past the 60 minute cooldown, and the item is not flapping,
+        # so the 12 hour flap cooldown does not apply.
+        self._expire_cooldown(database)
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            assert item.flap_count == 0
+            assert database._enqueue_event(session, event, item) is True
+            session.commit()
 
     def test_out_of_stock_still_subject_to_cooldown(self, database):
         database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock")])

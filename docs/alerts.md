@@ -51,8 +51,8 @@ Sends are spaced `MESSAGE_SEND_DELAY` seconds apart (0.5). If Discord answers 42
 
 To stop an item that's flapping from spamming you, a repeat alert of the same kind for the same item is suppressed for `NOTIFICATION_COOLDOWN_MINUTES` (60) after the last one was sent. The exceptions are "In stock" and "Pre-order" alerts, which are never suppressed unless the item is flapping (see below). The change itself is still recorded, so the next alert compares against the up-to-date state.
 
-Some products flip between in stock and out of stock every few minutes. If an item changes stock status `FLAP_TRANSITION_THRESHOLD` (3) times, each within `FLAP_WINDOW_MINUTES` (2 hours) of the last, it counts as flapping. While it is, you don't get its "Out of Stock" alerts, and its "In stock" and "Pre-order" alerts follow the normal cooldown, so you get at most one an hour. It stops counting as flapping after 2 hours without a change. New products are never affected.
+Some products flip between in stock and out of stock every few minutes. If an item changes stock status `FLAP_TRANSITION_THRESHOLD` (3) times, each within `FLAP_WINDOW_MINUTES` (12 hours) of the last, it counts as flapping. While it is, you don't get its "Out of Stock" alerts, and you get at most one "In stock" or "Pre-order" alert every `FLAP_ALERT_COOLDOWN_MINUTES` (12 hours). It stops counting as flapping after 12 hours without a change. New products are never affected.
 
 ## Tuning
 
-The thresholds above, including `FLAP_TRANSITION_THRESHOLD` and `FLAP_WINDOW_MINUTES`, are constants in `constants.py`. There's no config option for them, so edit the file and they apply from the next run. `REQUEST_TIMEOUT` (5 seconds) is there too, and is the one to raise if a slow shop keeps coming back empty.
+The thresholds above, including `FLAP_TRANSITION_THRESHOLD`, `FLAP_WINDOW_MINUTES` and `FLAP_ALERT_COOLDOWN_MINUTES`, are constants in `constants.py`. There's no config option for them, so edit the file and they apply from the next run. `REQUEST_TIMEOUT` (5 seconds) is there too, and is the one to raise if a slow shop keeps coming back empty.
