@@ -1067,7 +1067,7 @@ class TestOutboxChangeDetection:
         assert database._prices_differ(old, new) is differ
 
 
-_NAIVE = datetime(2026, 1, 1)  # noqa: DTZ001 - deliberately naive
+_NAIVE = datetime(2026, 1, 1)  # deliberately naive
 
 
 class TestUTCDateTime:
