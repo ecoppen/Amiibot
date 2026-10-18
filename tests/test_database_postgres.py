@@ -302,14 +302,14 @@ class TestUTCDateTime:
             raw = conn.execute(
                 sa.text("SELECT last_attempt_at FROM last_scraped")
             ).scalar_one()
-        assert raw == datetime(2026, 3, 4, 5, 0, 0)  # noqa: DTZ001 - naive UTC in the database
+        assert raw == datetime(2026, 3, 4, 5, 0, 0)  # naive UTC in the database
         with ready.Session() as session:
             assert session.query(LastScraped).one().last_attempt_at == stamp
 
     def test_naive_datetime_is_rejected(self, ready):
         with ready.Session() as session:
             session.add(
-                LastScraped(stockist="t.com", last_attempt_at=datetime(2026, 1, 1))  # noqa: DTZ001
+                LastScraped(stockist="t.com", last_attempt_at=datetime(2026, 1, 1))
             )
             with pytest.raises(sa.exc.StatementError):
                 session.commit()
