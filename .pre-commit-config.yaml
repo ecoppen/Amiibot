@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.17.0  # use latest when you run autoupdate
+  rev: v0.17.2  # use latest when you run autoupdate
   hooks:
     - id: ruff
       args: ["--fix", "--exit-non-zero-on-fix"]
