@@ -17,6 +17,7 @@ from constants import (
     FLAP_TRANSITION_THRESHOLD,
     FLAP_WINDOW_MINUTES,
     NOTIFICATION_COOLDOWN_MINUTES,
+    OUT_OF_STOCK_CONFIRM_RUNS,
     SCRAPING_FAILURE_GRACE_PERIOD,
 )
 from stockist.stockist import URGENT_STATUSES, Stock
@@ -46,6 +47,8 @@ _MIGRATION_ADDITIONS: list[tuple[str, str, str]] = [
     ("amiibo_stock", "first_seen_at", "TIMESTAMP"),
     ("amiibo_stock", "flap_count", "INTEGER DEFAULT 0"),
     ("amiibo_stock", "last_flap_at", "TIMESTAMP"),
+    ("amiibo_stock", "pending_stock", "VARCHAR"),
+    ("amiibo_stock", "pending_runs", "INTEGER DEFAULT 0"),
     ("last_scraped", "last_attempt_at", "TIMESTAMP DEFAULT {now_utc}"),
     ("last_scraped", "last_healthy_count", "INTEGER DEFAULT 0"),
     ("last_scraped", "last_success_at", "TIMESTAMP"),
@@ -136,6 +139,8 @@ class AmiiboStock(Base):
     first_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
     flap_count: Mapped[int] = mapped_column(default=0)
     last_flap_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    pending_stock: Mapped[str | None] = mapped_column(nullable=True)
+    pending_runs: Mapped[int] = mapped_column(default=0)
 
 
 class NotificationOutbox(Base):
@@ -646,6 +651,35 @@ class Database:
             and now - item.last_flap_at <= timedelta(minutes=FLAP_WINDOW_MINUTES)
         )
 
+    @staticmethod
+    def _clear_pending(item: AmiiboStock) -> None:
+        """Forget an Out of Stock report that was waiting to be confirmed."""
+        if item.pending_stock is not None or item.pending_runs:
+            item.pending_stock = None
+            item.pending_runs = 0
+
+    @staticmethod
+    def _out_of_stock_unconfirmed(item: AmiiboStock, new_stock: str) -> bool:
+        """Count a run that reports an In stock or Pre-order item as Out of Stock.
+
+        Returns True while the report has been seen fewer than
+        ``OUT_OF_STOCK_CONFIRM_RUNS`` runs in a row, so the caller leaves the
+        stored status alone. Anything else (including the run that reaches the
+        threshold) returns False and the transition goes ahead.
+        """
+        if item.Stock not in URGENT_STATUSES or new_stock != Stock.OUT_OF_STOCK.value:
+            return False
+        runs = item.pending_runs + 1 if item.pending_stock == new_stock else 1
+        if runs >= OUT_OF_STOCK_CONFIRM_RUNS:
+            return False
+        item.pending_stock = new_stock
+        item.pending_runs = runs
+        log.info(
+            f"{item.Title} reported Out of Stock "
+            f"({runs}/{OUT_OF_STOCK_CONFIRM_RUNS} runs), waiting to confirm"
+        )
+        return True
+
     def _enqueue_event(
         self, session: Any, event: dict[str, Any], item: AmiiboStock
     ) -> bool:
@@ -729,7 +763,10 @@ class Database:
         return added
 
     def check_then_add_or_update_amiibo(
-        self, data: list[dict[str, Any]], skip_delisting: bool = False
+        self,
+        data: list[dict[str, Any]],
+        skip_delisting: bool = False,
+        new_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Apply a scrape to the database and enqueue notifications.
 
@@ -737,11 +774,19 @@ class Database:
         written to the notification outbox in the same transaction as the state
         change. Returns the events that were enqueued (cooldown-suppressed
         events are applied to state but not returned).
+
+        An In stock or Pre-order item reported as Out of Stock is left as it is
+        until that has been seen ``OUT_OF_STOCK_CONFIRM_RUNS`` runs in a row. Any
+        other outcome for the item in between forgets the count.
+
+        With ``new_only``, events for items already in the database are applied
+        to state but not enqueued or returned. New items still are.
         """
         if not data:
             return []
 
         statistics = {"New": 0, "Updated": 0, "Deleted": 0}
+        skipped = 0
         output: list[dict[str, Any]] = []
         website = data[0]["Website"]
 
@@ -770,24 +815,38 @@ class Database:
                             log.info(f"{item.Title} has returned to the listing")
                             item.is_active = True
                             item.delisted_at = None
+                            self._clear_pending(item)
                             event = self._handle_stock_change(session, item, new_datum)
                         elif new_datum["Stock"] != item.Stock:
+                            if self._out_of_stock_unconfirmed(item, new_datum["Stock"]):
+                                continue
+                            self._clear_pending(item)
                             self._record_stock_transition(item, utcnow())
                             event = self._handle_stock_change(session, item, new_datum)
-                        elif self._prices_differ(item.Price, new_datum["Price"]):
-                            event = self._handle_price_change(
-                                session, item, new_datum["Price"]
-                            )
+                        else:
+                            if item.pending_stock is not None:
+                                log.info(
+                                    f"{item.Title} was reported Out of Stock for "
+                                    f"{item.pending_runs} run(s) but is back to "
+                                    f"{item.Stock}, ignoring the blip"
+                                )
+                            self._clear_pending(item)
+                            if self._prices_differ(item.Price, new_datum["Price"]):
+                                event = self._handle_price_change(
+                                    session, item, new_datum["Price"]
+                                )
                         if event is not None:
                             statistics["Updated"] += 1
                     elif not item.is_active:
                         # Already delisted: do not count misses or re-emit.
                         continue
                     elif skip_delisting:
+                        self._clear_pending(item)
                         log.debug(
                             f"Skipping delisting check for {item.Title} (health check active)"
                         )
                     else:
+                        self._clear_pending(item)
                         item.missed_count += 1
                         log.info(
                             f"{item.Title} missed {item.missed_count} time(s) "
@@ -797,8 +856,11 @@ class Database:
                             statistics["Deleted"] += 1
                             event = self._handle_delisted_item(session, item)
 
-                    if event is not None and self._enqueue_event(session, event, item):
-                        output.append(event)
+                    if event is not None:
+                        if new_only:
+                            skipped += 1
+                        elif self._enqueue_event(session, event, item):
+                            output.append(event)
 
                 new_items = [d for d in data if d["URL"] not in existing_urls]
                 if new_items:
@@ -816,4 +878,6 @@ class Database:
             f"Updated: {statistics['Updated']}, "
             f"Deleted: {statistics['Deleted']}"
         )
+        if skipped:
+            log.info(f"new-only: skipped {skipped} alert(s) for existing products")
         return output

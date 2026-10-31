@@ -4,4 +4,4 @@
 cd ~/Amiibot || exit
 
 # Execute the command
-uv run amiibot.py
+uv run amiibot.py "$@"

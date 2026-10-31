@@ -54,7 +54,7 @@ The first run alerts on every product it finds. After that you only get alerts f
 Run summary: status=SUCCESS exit=0 stockists=2/2 notifications=0
 ```
 
-`amiibot_runner.sh` does the same thing from `~/Amiibot` if you want something to point cron at.
+`amiibot_runner.sh` does the same thing from `~/Amiibot` if you want something to point cron at. It passes any flags on, so `amiibot_runner.sh --new-only` works too (see [New products only](alerts.md#new-products-only)).
 
 ### Exit codes
 

@@ -50,11 +50,14 @@ class CycleStats:
 
 
 class Scraper:
-    def __init__(self, config: Any, stockists: Any, database: Any) -> None:
+    def __init__(
+        self, config: Any, stockists: Any, database: Any, new_only: bool = False
+    ) -> None:
         self.stockists = stockists
         self.messengers = stockists.messengers
         self.database = database
         self.config = config
+        self.new_only = new_only
 
     def scrape(self) -> RunResult:
         try:
@@ -253,7 +256,7 @@ class Scraper:
         # Events are enqueued in the outbox in the same transaction as the state
         # change; they are delivered by _flush_outbox.
         queued = self.database.check_then_add_or_update_amiibo(
-            validated_items, skip_delisting=skip_delisting
+            validated_items, skip_delisting=skip_delisting, new_only=self.new_only
         )
         if len(queued) == 0:
             log.info(f"No changes detected for {stockist.name}")

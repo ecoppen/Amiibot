@@ -493,6 +493,12 @@ def _datum(
 class TestOutboxChangeDetection:
     """Change detection, atomic outbox enqueueing and cooldown behaviour."""
 
+    @pytest.fixture(autouse=True)
+    def immediate_out_of_stock(self, monkeypatch):
+        # Confirming a drop to Out of Stock has its own tests below; these are
+        # about change detection, cooldowns and flapping.
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 1)
+
     @pytest.fixture
     def database(self):
         import os
@@ -1067,6 +1073,430 @@ class TestOutboxChangeDetection:
         assert database._prices_differ(old, new) is differ
 
 
+class TestOutOfStockConfirmation:
+    """A drop to Out of Stock only counts once it has been seen several runs in a row."""
+
+    @pytest.fixture(autouse=True)
+    def three_runs(self, monkeypatch):
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 3)
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_oos_confirm_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _outbox(database):
+        with database.Session() as session:
+            return (
+                session.query(NotificationOutbox).order_by(NotificationOutbox.id).all()
+            )
+
+    @staticmethod
+    def _item(database, url="https://t.com/1"):
+        with database.Session() as session:
+            return session.query(AmiiboStock).filter_by(URL=url).one()
+
+    @staticmethod
+    def _scrape(database, stock, **kwargs):
+        """Scrape the item once and return the event statuses it produced."""
+        colour = {"Out of Stock": 0xFF0000, "Pre-order": 0xFFA500}.get(stock, 0x00FF00)
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock=stock, colour=colour, **kwargs)]
+        )
+        return [e["Stock"] for e in events]
+
+    def _assert_pending(self, database, stock, runs):
+        item = self._item(database)
+        assert (item.pending_stock, item.pending_runs) == (stock, runs)
+
+    @pytest.mark.parametrize("blip_runs", [1, 2])
+    def test_short_out_of_stock_blip_is_ignored(self, database, blip_runs):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        for run in range(1, blip_runs + 1):
+            assert self._scrape(database, "Out of Stock") == []
+            assert self._item(database).Stock == "In stock"
+            self._assert_pending(database, "Out of Stock", run)
+        assert self._scrape(database, "In stock") == []
+
+        item = self._item(database)
+        assert item.Stock == "In stock"
+        self._assert_pending(database, None, 0)
+        # The blip is not a transition, so it does not count towards flapping.
+        assert item.flap_count == 0
+        assert item.last_flap_at is None
+        assert [r.stock_status for r in self._outbox(database)] == ["In stock"]
+
+    def test_third_consecutive_run_confirms_with_one_event(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        assert self._scrape(database, "Out of Stock") == []
+        assert self._scrape(database, "Out of Stock") == []
+        assert self._item(database).Stock == "In stock"
+        assert self._scrape(database, "Out of Stock") == ["Out of Stock"]
+
+        item = self._item(database)
+        assert item.Stock == "Out of Stock"
+        assert int(item.Colour) == 0xFF0000
+        assert item.flap_count == 1
+        assert item.last_notified_status == "Out of Stock"
+        self._assert_pending(database, None, 0)
+        # Further Out of Stock runs are just an unchanged status.
+        assert self._scrape(database, "Out of Stock") == []
+        self._assert_pending(database, None, 0)
+        assert [r.stock_status for r in self._outbox(database)] == [
+            "In stock",
+            "Out of Stock",
+        ]
+
+    def test_pre_order_to_out_of_stock_is_confirmed_the_same_way(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Pre-order", colour=0xFFA500)]
+        )
+
+        assert self._scrape(database, "Out of Stock") == []
+        assert self._scrape(database, "Out of Stock") == []
+        assert self._item(database).Stock == "Pre-order"
+        assert self._scrape(database, "Out of Stock") == ["Out of Stock"]
+        assert self._item(database).Stock == "Out of Stock"
+
+    def test_out_of_stock_to_in_stock_is_immediate(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+
+        assert self._scrape(database, "In stock") == ["In stock"]
+        assert self._item(database).Stock == "In stock"
+        self._assert_pending(database, None, 0)
+
+    def test_in_stock_to_pre_order_is_immediate(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        assert self._scrape(database, "Pre-order") == ["Pre-order"]
+        assert self._item(database).Stock == "Pre-order"
+
+    def test_other_transition_clears_pending(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+        self._scrape(database, "Out of Stock")
+        self._assert_pending(database, "Out of Stock", 1)
+
+        assert self._scrape(database, "Pre-order") == ["Pre-order"]
+        self._assert_pending(database, None, 0)
+
+        # The count starts again from one.
+        assert self._scrape(database, "Out of Stock") == []
+        self._assert_pending(database, "Out of Stock", 1)
+
+    def test_missed_run_resets_the_count(self, database):
+        other = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([_datum(), other])
+
+        def run(item_stock):
+            data = [other] if item_stock is None else [_datum(stock=item_stock), other]
+            return [
+                e["Stock"]
+                for e in database.check_then_add_or_update_amiibo(data)
+                if e["URL"] == "https://t.com/1"
+            ]
+
+        assert run("Out of Stock") == []
+        self._assert_pending(database, "Out of Stock", 1)
+
+        assert run(None) == []
+        self._assert_pending(database, None, 0)
+        assert self._item(database).missed_count == 1
+
+        # Two more runs are not enough, because the count started again.
+        assert run("Out of Stock") == []
+        assert run("Out of Stock") == []
+        self._assert_pending(database, "Out of Stock", 2)
+        assert run("Out of Stock") == ["Out of Stock"]
+
+    def test_run_skipped_by_health_check_also_resets_the_count(self, database):
+        other = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([_datum(), other])
+        database.check_then_add_or_update_amiibo([_datum(stock="Out of Stock"), other])
+        self._assert_pending(database, "Out of Stock", 1)
+
+        database.check_then_add_or_update_amiibo([other], skip_delisting=True)
+
+        self._assert_pending(database, None, 0)
+        assert self._item(database).missed_count == 0
+
+    def test_price_change_is_not_reported_while_waiting(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="$19.99")])
+
+        assert self._scrape(database, "Out of Stock", price="$24.99") == []
+        assert self._item(database).Price == "$19.99"
+
+        # Back in stock at the new price: nothing is lost, the price change is seen.
+        assert self._scrape(database, "In stock", price="$24.99") == ["Price change"]
+        assert self._item(database).Price == "$24.99"
+        self._assert_pending(database, None, 0)
+
+    def test_confirmed_drop_carries_the_new_price(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="$19.99")])
+        self._scrape(database, "Out of Stock", price="$24.99")
+        self._scrape(database, "Out of Stock", price="$24.99")
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", price="$24.99", colour=0xFF0000)]
+        )
+
+        assert [(e["Stock"], e["Price"]) for e in events] == [
+            ("Out of Stock", "$24.99")
+        ]
+        assert self._item(database).Price == "$24.99"
+
+    def test_waiting_and_blip_are_logged(self, database, caplog):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        with caplog.at_level("INFO"):
+            self._scrape(database, "Out of Stock")
+            self._scrape(database, "Out of Stock")
+            self._scrape(database, "In stock")
+
+        assert "reported Out of Stock (1/3 runs), waiting to confirm" in caplog.text
+        assert "reported Out of Stock (2/3 runs), waiting to confirm" in caplog.text
+        assert "was reported Out of Stock for 2 run(s)" in caplog.text
+        assert "ignoring the blip" in caplog.text
+
+    def test_other_items_are_not_held_back(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")]
+        )
+
+        events = database.check_then_add_or_update_amiibo(
+            [
+                _datum("https://t.com/1", stock="Out of Stock"),
+                _datum("https://t.com/2", price="$24.99"),
+                _datum("https://t.com/3"),
+            ]
+        )
+
+        assert sorted(e["URL"] for e in events) == [
+            "https://t.com/2",
+            "https://t.com/3",
+        ]
+        assert self._item(database, "https://t.com/1").pending_runs == 1
+        assert self._item(database, "https://t.com/2").pending_runs == 0
+
+    def test_new_items_are_unaffected(self, database):
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        assert [e["Stock"] for e in events] == ["Out of Stock"]
+        self._assert_pending(database, None, 0)
+
+    def test_one_run_confirmation_is_immediate(self, database, monkeypatch):
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 1)
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        assert self._scrape(database, "Out of Stock") == ["Out of Stock"]
+        assert self._item(database).Stock == "Out of Stock"
+        self._assert_pending(database, None, 0)
+
+        assert self._scrape(database, "In stock") == ["In stock"]
+
+
+class TestNewOnly:
+    """With new_only, existing items are recorded but only new ones alert."""
+
+    @pytest.fixture(autouse=True)
+    def immediate_out_of_stock(self, monkeypatch):
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 1)
+
+    @pytest.fixture
+    def database(self):
+        import os
+        import uuid
+
+        config = DatabaseConfig(
+            engine="sqlite", name=f"test_new_only_{uuid.uuid4().hex[:8]}"
+        )
+        db = Database(config)
+        db.ensure_schema()
+        yield db
+        db.engine.dispose()
+        if os.path.exists(f"{config.name}.db"):
+            os.remove(f"{config.name}.db")
+
+    @staticmethod
+    def _outbox(database):
+        with database.Session() as session:
+            return (
+                session.query(NotificationOutbox).order_by(NotificationOutbox.id).all()
+            )
+
+    @staticmethod
+    def _item(database, url="https://t.com/1"):
+        with database.Session() as session:
+            return session.query(AmiiboStock).filter_by(URL=url).one()
+
+    def _assert_notified_unchanged(self, database, before):
+        item = self._item(database)
+        assert item.last_notified_at == before.last_notified_at
+        assert item.last_notified_status == before.last_notified_status
+
+    def test_first_run_alerts_on_every_item(self, database):
+        events = database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")], new_only=True
+        )
+        assert len(events) == 2
+        assert len(self._outbox(database)) == 2
+
+    def test_new_item_alerts_but_existing_changes_do_not(self, database):
+        database.check_then_add_or_update_amiibo([_datum("https://t.com/1")])
+
+        events = database.check_then_add_or_update_amiibo(
+            [
+                _datum("https://t.com/1", stock="Out of Stock", colour=0xFF0000),
+                _datum("https://t.com/2"),
+            ],
+            new_only=True,
+        )
+
+        assert [e["URL"] for e in events] == ["https://t.com/2"]
+        assert [r.url for r in self._outbox(database)] == [
+            "https://t.com/1",
+            "https://t.com/2",
+        ]
+        assert self._item(database).Stock == "Out of Stock"
+
+    def test_stock_change_is_recorded_but_not_alerted(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+        before = self._item(database)
+
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)], new_only=True
+        )
+
+        assert events == []
+        assert len(self._outbox(database)) == 1
+        item = self._item(database)
+        assert item.Stock == "Out of Stock"
+        assert int(item.Colour) == 0xFF0000
+        assert item.flap_count == 1
+        self._assert_notified_unchanged(database, before)
+
+        # The change is already in the stored state, so the next normal run
+        # has nothing to report either.
+        assert (
+            database.check_then_add_or_update_amiibo(
+                [_datum(stock="Out of Stock", colour=0xFF0000)]
+            )
+            == []
+        )
+
+    def test_restock_is_recorded_but_not_alerted(self, database):
+        database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        before = self._item(database)
+
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="In stock")], new_only=True
+        )
+
+        assert events == []
+        assert len(self._outbox(database)) == 1
+        assert self._item(database).Stock == "In stock"
+        self._assert_notified_unchanged(database, before)
+
+    def test_price_change_is_recorded_but_not_alerted(self, database):
+        database.check_then_add_or_update_amiibo([_datum(price="$19.99")])
+        before = self._item(database)
+
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(price="$24.99")], new_only=True
+        )
+
+        assert events == []
+        assert len(self._outbox(database)) == 1
+        assert self._item(database).Price == "$24.99"
+        self._assert_notified_unchanged(database, before)
+
+    def test_delisting_and_relisting_are_recorded_but_not_alerted(self, database):
+        keep = _datum("https://t.com/1")
+        gone = _datum("https://t.com/2")
+        database.check_then_add_or_update_amiibo([keep, gone])
+        before = self._item(database, "https://t.com/2")
+
+        for _ in range(SCRAPING_FAILURE_GRACE_PERIOD):
+            events = database.check_then_add_or_update_amiibo([keep], new_only=True)
+            assert events == []
+
+        item = self._item(database, "https://t.com/2")
+        assert item.is_active is False
+        assert item.delisted_at is not None
+        assert len(self._outbox(database)) == 2
+
+        events = database.check_then_add_or_update_amiibo([keep, gone], new_only=True)
+
+        assert events == []
+        item = self._item(database, "https://t.com/2")
+        assert item.is_active is True
+        assert item.delisted_at is None
+        assert len(self._outbox(database)) == 2
+        assert item.last_notified_at == before.last_notified_at
+        assert item.last_notified_status == before.last_notified_status
+
+    def test_confirmation_still_applies(self, database, monkeypatch):
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 3)
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+
+        for _ in range(2):
+            database.check_then_add_or_update_amiibo(
+                [_datum(stock="Out of Stock")], new_only=True
+            )
+        assert self._item(database).Stock == "In stock"
+
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock")], new_only=True
+        )
+        assert events == []
+        assert self._item(database).Stock == "Out of Stock"
+        assert len(self._outbox(database)) == 1
+
+    def test_skipped_alerts_are_logged_only_when_there_are_some(self, database, caplog):
+        database.check_then_add_or_update_amiibo(
+            [_datum("https://t.com/1"), _datum("https://t.com/2")]
+        )
+
+        with caplog.at_level("INFO"):
+            database.check_then_add_or_update_amiibo(
+                [_datum("https://t.com/1"), _datum("https://t.com/2")], new_only=True
+            )
+        assert "skipped" not in caplog.text
+
+        with caplog.at_level("INFO"):
+            database.check_then_add_or_update_amiibo(
+                [
+                    _datum("https://t.com/1", price="$24.99"),
+                    _datum("https://t.com/2", price="$24.99"),
+                ],
+                new_only=True,
+            )
+        assert "new-only: skipped 2 alert(s)" in caplog.text
+
+    def test_existing_item_changes_still_alert_by_default(self, database):
+        database.check_then_add_or_update_amiibo([_datum(stock="In stock")])
+        events = database.check_then_add_or_update_amiibo(
+            [_datum(stock="Out of Stock", colour=0xFF0000)]
+        )
+        assert [e["Stock"] for e in events] == ["Out of Stock"]
+
+
 _NAIVE = datetime(2026, 1, 1)  # deliberately naive
 
 
@@ -1419,6 +1849,24 @@ class TestFlapColumnsMigration:
             item = session.query(AmiiboStock).one()
             assert item.flap_count == 0
             assert item.last_flap_at is None
+
+    def test_old_table_gets_pending_columns_and_is_idempotent(self, database):
+        def columns():
+            return {
+                c["name"]
+                for c in sa.inspect(database.engine).get_columns("amiibo_stock")
+            }
+
+        assert not {"pending_stock", "pending_runs"} & columns()
+
+        database._run_migrations()
+        database._run_migrations()
+
+        assert {"pending_stock", "pending_runs"} <= columns()
+        with database.Session() as session:
+            item = session.query(AmiiboStock).one()
+            assert item.pending_stock is None
+            assert item.pending_runs == 0
 
 
 class TestFailureAlertState:

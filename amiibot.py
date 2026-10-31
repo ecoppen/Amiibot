@@ -112,7 +112,7 @@ def cleanup() -> None:
     log.info("Shutdown complete")
 
 
-def main(log_json: bool = False) -> RunResult:
+def main(log_json: bool = False, new_only: bool = False) -> RunResult:
     global _lock_file
     try:
         # Deliberately held open for the whole process; released in cleanup().
@@ -136,7 +136,9 @@ def main(log_json: bool = False) -> RunResult:
     _database.ensure_schema()
     _messengers = MessageManager(config=config.messengers)
     stockists = StockistManager(messengers=_messengers)
-    scraper = Scraper(config=config, stockists=stockists, database=_database)
+    scraper = Scraper(
+        config=config, stockists=stockists, database=_database, new_only=new_only
+    )
 
     log.info("Starting scraper...")
     result = scraper.scrape()
@@ -151,10 +153,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Emit JSON log lines on the console (file logs are always JSON)",
     )
+    parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="Only send alerts for products not seen before; other changes are still recorded",
+    )
     args = parser.parse_args()
     setup_logging(log_json=args.log_json)
     try:
-        result = main()
+        result = main(new_only=args.new_only)
     except KeyboardInterrupt:
         log.info("Interrupted by user")
         result = RunResult(

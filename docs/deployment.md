@@ -10,6 +10,12 @@ Both examples below assume Amiibot is in `/home/you/Amiibot` and you've already 
 */10 * * * * cd /home/you/Amiibot && .venv/bin/python amiibot.py >> cron.log 2>&1
 ```
 
+If you only want alerts for products Amiibot hasn't seen before (see [How alerts work](alerts.md#new-products-only)), add `--new-only`:
+
+```
+*/10 * * * * cd /home/you/Amiibot && .venv/bin/python amiibot.py --new-only >> cron.log 2>&1
+```
+
 Add it with `crontab -e`. `log.txt` already has everything and rotates itself, but `cron.log` doesn't, and it's the only place a crash before logging starts (a missing dependency, say) would show up.
 
 ## systemd timer

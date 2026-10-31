@@ -186,6 +186,8 @@ class TestMigrationFromOldSchema:
             assert stock.is_active is True
             assert stock.last_notified_at is None
             assert stock.first_seen_at is None
+            assert stock.pending_stock is None
+            assert stock.pending_runs == 0
 
             scraped = session.query(LastScraped).one()
             # Renamed columns keep their values.

@@ -79,6 +79,11 @@ FLAP_WINDOW_MINUTES = 720
 FLAP_ALERT_COOLDOWN_MINUTES = 720
 """Minimum minutes between In stock / Pre-order alerts for an item that is flapping."""
 
+OUT_OF_STOCK_CONFIRM_RUNS = 3
+"""Runs in a row an In stock or Pre-order item must be reported Out of Stock before
+   the change is accepted. Shorter blips are ignored, so neither the Out of Stock
+   alert nor the In stock alert that would follow it is sent."""
+
 # ============================================================================
 # DATABASE SETTINGS
 # ============================================================================

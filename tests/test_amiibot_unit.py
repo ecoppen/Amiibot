@@ -144,6 +144,51 @@ class TestAmiibotMainExecution:
         assert result.exit_code == 2
 
 
+class TestNewOnlyFlag:
+    @staticmethod
+    def _run_main(new_only=None):
+        from result import RunResult, RunStatus
+
+        with (
+            patch("amiibot.Scraper") as scraper_class,
+            patch("amiibot.StockistManager"),
+            patch("amiibot.MessageManager"),
+            patch("amiibot.Database"),
+            patch("amiibot.load_config"),
+        ):
+            scraper_class.return_value.scrape.return_value = RunResult(
+                status=RunStatus.SUCCESS, exit_code=0
+            )
+            import amiibot
+
+            if new_only is None:
+                amiibot.main()
+            else:
+                amiibot.main(new_only=new_only)
+            return scraper_class.call_args.kwargs
+
+    def test_main_passes_new_only_to_the_scraper(self):
+        assert self._run_main(new_only=True)["new_only"] is True
+
+    def test_main_defaults_to_alerting_on_everything(self):
+        assert self._run_main()["new_only"] is False
+
+    def test_flag_is_listed_in_help(self, tmp_path):
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [sys.executable, str(root / "amiibot.py"), "--help"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "--new-only" in result.stdout
+
+
 class TestAmiibotConfigLoading:
     def test_config_path_default(self):
         expected_path = Path("config", "config.json")

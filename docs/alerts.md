@@ -47,12 +47,34 @@ If a send fails with a timeout, a 5xx or a 429 it's tried again on later runs, a
 
 Sends are spaced `MESSAGE_SEND_DELAY` seconds apart (0.5). If Discord answers 429, that messenger is paused for the rest of the run and its remaining alerts wait for the next one.
 
+## Out of Stock confirmation
+
+Some shops, Nintendo UK especially, now and then report a product as out of stock for a run or two and then put it straight back. Without a check that gives you an "Out of Stock" alert followed by an "In stock" one for something that never sold out.
+
+So when a product that is in stock or on pre-order is reported as out of stock, Amiibot waits. It only records the change and sends the alert once the shop has said so `OUT_OF_STOCK_CONFIRM_RUNS` runs in a row (3 by default). If the product is back to its old status before that, the blip is ignored: no "Out of Stock" alert, no "In stock" alert after it, and it doesn't count towards flapping. The log says when Amiibot is waiting and when it ignored a blip.
+
+Only that one change is held back. "In stock" and "Pre-order" alerts, and a move from in stock to pre-order, are sent straight away. A run where the product is missing from the shop's listing starts the count again. Price changes aren't looked at on the runs it is waiting, but they're picked up once the product is back or the drop is confirmed.
+
+The catch is that a real sell-out is alerted two runs later than it would otherwise be.
+
 ## Cooldown
 
 To stop an item that's flapping from spamming you, a repeat alert of the same kind for the same item is suppressed for `NOTIFICATION_COOLDOWN_MINUTES` (60) after the last one was sent. The exceptions are "In stock" and "Pre-order" alerts, which are never suppressed unless the item is flapping (see below). The change itself is still recorded, so the next alert compares against the up-to-date state.
 
-Some products flip between in stock and out of stock every few minutes. If an item changes stock status `FLAP_TRANSITION_THRESHOLD` (3) times, each within `FLAP_WINDOW_MINUTES` (12 hours) of the last, it counts as flapping. While it is, you don't get its "Out of Stock" alerts, and you get at most one "In stock" or "Pre-order" alert every `FLAP_ALERT_COOLDOWN_MINUTES` (12 hours). It stops counting as flapping after 12 hours without a change. New products are never affected.
+Some products flip between in stock and out of stock every few minutes. If an item changes stock status `FLAP_TRANSITION_THRESHOLD` (3) times, each within `FLAP_WINDOW_MINUTES` (12 hours) of the last, it counts as flapping. While it is, you don't get its "Out of Stock" alerts, and you get at most one "In stock" or "Pre-order" alert every `FLAP_ALERT_COOLDOWN_MINUTES` (12 hours). It stops counting as flapping after 12 hours without a change. New products are never affected. Short drops to out of stock are dealt with before any of this (see [Out of Stock confirmation](#out-of-stock-confirmation)).
+
+## New products only
+
+Run Amiibot with `--new-only` and you only get alerts for products it hasn't seen before:
+
+```bash
+uv run amiibot.py --new-only
+```
+
+Stock changes, price changes, delistings and relistings of products it already knows about are still recorded, just not sent. They don't count as the last alert for the cooldown either. The first run against a shop still alerts on everything, because every product is new. The flag covers every shop in that run, and alerts that were already waiting to be sent still go out.
+
+The "keeps failing" and "working again" messages aren't affected. Because the changes are recorded, dropping the flag later doesn't replay them. The next run compares against what the `--new-only` runs saw.
 
 ## Tuning
 
-The thresholds above, including `FLAP_TRANSITION_THRESHOLD`, `FLAP_WINDOW_MINUTES` and `FLAP_ALERT_COOLDOWN_MINUTES`, are constants in `constants.py`. There's no config option for them, so edit the file and they apply from the next run. `REQUEST_TIMEOUT` (5 seconds) is there too, and is the one to raise if a slow shop keeps coming back empty.
+The thresholds above, including `FLAP_TRANSITION_THRESHOLD`, `FLAP_WINDOW_MINUTES`, `FLAP_ALERT_COOLDOWN_MINUTES` and `OUT_OF_STOCK_CONFIRM_RUNS`, are constants in `constants.py`. There's no config option for them, so edit the file and they apply from the next run. Set `OUT_OF_STOCK_CONFIRM_RUNS` to 1 to get "Out of Stock" alerts straight away again. `REQUEST_TIMEOUT` (5 seconds) is there too, and is the one to raise if a slow shop keeps coming back empty.

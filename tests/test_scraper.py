@@ -97,6 +97,30 @@ class TestScraper:
         assert scraper.database == mock_database
         assert scraper.messengers == mock_stockists.messengers
 
+    def test_new_only_is_off_by_default(self, scraper, mock_stockist, mock_database):
+        mock_stockist.get_amiibo.return_value = [_scrape_item()]
+
+        scraper.scrape_cycle()
+
+        call_args = mock_database.check_then_add_or_update_amiibo.call_args
+        assert call_args[1]["new_only"] is False
+
+    def test_new_only_is_passed_to_the_database(
+        self, mock_config, mock_stockists, mock_stockist, mock_database
+    ):
+        scraper = Scraper(
+            config=mock_config,
+            stockists=mock_stockists,
+            database=mock_database,
+            new_only=True,
+        )
+        mock_stockist.get_amiibo.return_value = [_scrape_item()]
+
+        scraper.scrape_cycle()
+
+        call_args = mock_database.check_then_add_or_update_amiibo.call_args
+        assert call_args[1]["new_only"] is True
+
     def test_scrape_returns_run_result(self, scraper):
         scraper.scrape_cycle = Mock()
         scraper.scrape_cycle.return_value = CycleStats(
@@ -234,7 +258,7 @@ class TestScraper:
         manager = self._three_stockists(mock_messenger)
         scraper = Scraper(config=mock_config, stockists=manager, database=mock_database)
 
-        def check(items, skip_delisting=False):
+        def check(items, skip_delisting=False, new_only=False):
             if items[0].get("Website", items[0]["URL"]).startswith("b.com"):
                 raise RuntimeError("db exploded")
             return [items[0]]
@@ -590,6 +614,12 @@ class TestScraperOutboxDelivery:
             self.sleep = mock_sleep
             yield mock_sleep
 
+    @pytest.fixture(autouse=True)
+    def immediate_out_of_stock(self, monkeypatch):
+        # Confirming a drop to Out of Stock is tested in test_database.py; these
+        # tests are about delivery.
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 1)
+
     @pytest.fixture
     def database(self):
         import os
@@ -722,6 +752,19 @@ class TestScraperOutboxDelivery:
             "In stock",
         ]
         assert self._sent_statuses(m).count("In stock") == 2
+
+    def test_out_of_stock_blip_is_not_delivered(self, database, monkeypatch):
+        monkeypatch.setattr("database.OUT_OF_STOCK_CONFIRM_RUNS", 3)
+        m = self._messenger()
+        holder = {"items": [_scrape_item("In stock")]}
+        scraper, _ = self._build(database, [m], holder)
+        scraper.scrape_cycle()
+
+        for stock in ["Out of Stock", "Out of Stock", "In stock"]:
+            holder["items"] = [_scrape_item(stock)]
+            scraper.scrape_cycle()
+
+        assert self._sent_statuses(m) == ["In stock"]
 
     def test_two_price_changes_are_both_delivered(self, database):
         m = self._messenger()
@@ -1090,6 +1133,20 @@ class TestStockistFailureAlerts:
 
         self._run(scraper, 1)
         assert m.send_message.call_count == 1
+
+    def test_new_only_does_not_affect_health_messages(self, database):
+        m = self._messenger()
+        holder = {"mode": "raise"}
+        scraper = self._build(database, [m], holder)
+        scraper.new_only = True
+
+        self._run(scraper, 6)
+        assert m.send_message.call_count == 1
+
+        holder["mode"] = "ok"
+        self._run(scraper, 1)
+        assert m.send_message.call_count == 2
+        assert "is working again" in m.send_message.call_args[0][0]
 
     def test_empty_result_uses_returned_no_items(self, database):
         m = self._messenger()

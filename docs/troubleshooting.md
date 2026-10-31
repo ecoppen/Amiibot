@@ -41,7 +41,7 @@ On a Raspberry Pi or other ARM Linux box that automatic download often doesn't w
 Work through these in order:
 
 1. Is the messenger `"active": true`? An inactive one scrapes but never sends.
-2. Did the run log `Queued N notification(s)`? If not, nothing changed, or the change was inside the 60-minute cooldown or dropped because the item was flapping (the log says `cooldown` or `flapping`).
+2. Did the run log `Queued N notification(s)`? If not, nothing changed, or the change was inside the 60-minute cooldown or dropped because the item was flapping (the log says `cooldown` or `flapping`). An out of stock report that hasn't been confirmed yet logs `waiting to confirm`, and with `--new-only` changes to products it already knows about are never sent.
 3. If it queued some, look at what happened to them:
 
     ```bash
